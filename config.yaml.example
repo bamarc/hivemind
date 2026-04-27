@@ -1,0 +1,30 @@
+# Hivemind Configuration Example
+
+qdrant:
+  url: "http://localhost:6333"
+  # api_key: "your-qdrant-api-key"
+  collection_name: "hivemind_code"
+
+model:
+  api_url: "http://localhost:1234/v1"
+  model_name: "qwen3-4B-embedding"
+  # api_key: "sk-lm-mvxiR7RH:jaECEpnuouH8QMcagX6U"
+  embedding_dim: 2500
+
+chunking:
+  strategy: "by_size"
+  language_aware: true
+  by_size:
+    chunk_size: 500
+    overlap: 50
+
+api:
+  host: "0.0.0.0"
+  port: 8001
+
+logging:
+  level: "INFO"
+  # file_path: "hivemind.log"
+
+git_enabled: true
+git_only_tracked: false
