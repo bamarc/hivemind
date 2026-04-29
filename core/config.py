@@ -9,17 +9,30 @@ from pydantic_settings import (
     YamlConfigSettingsSource
 )
 
+class ScoutSettings(BaseSettings):
+    urls: List[str] = []
+    output_directory: str = "docs/scout"
+    recursive: bool = False
+    max_pages_per_domain: int = 50
+    exclude_patterns: List[str] = ["*login*", "*signup*", "*cart*", "*pricing*"]
+    content_filter: bool = True
+
 class QdrantSettings(BaseSettings):
     url: str = "http://localhost:6333"
     api_key: Optional[SecretStr] = None
     collection_name: str = "hivemind_code"
 
-class ModelSettings(BaseSettings):
+class EmbeddingSettings(BaseSettings):
     api_url: str = "http://localhost:1234/v1"
     model_name: str = "qwen3-4B-embedding"
     api_key: Optional[SecretStr] = None
     embedding_dim: int = 2500
     batch_size: int = 100
+
+class ChatSettings(BaseSettings):
+    api_url: str = "http://localhost:1234/v1"
+    model_name: str = "gpt-4o"
+    api_key: Optional[SecretStr] = None
 
 class BySizeSettings(BaseSettings):
     chunk_size: int = 500
@@ -56,6 +69,11 @@ class SecuritySettings(BaseSettings):
     secret_file: Path = Path("~/.hivemind/secrets.yaml").expanduser()
     api_key_header: str = "X-API-Key"
 
+class PreprocessorSettings(BaseSettings):
+    enabled: bool = True
+    # Allow users to add custom directories for pre-processors if needed
+    plugin_directories: List[Path] = []
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="HIVEMIND_",
@@ -68,17 +86,20 @@ class Settings(BaseSettings):
     )
 
     qdrant: QdrantSettings = QdrantSettings()
-    model: ModelSettings = ModelSettings()
+    model: EmbeddingSettings = EmbeddingSettings()
+    chat: ChatSettings = ChatSettings()
     chunking: ChunkingSettings = ChunkingSettings()
     api: ApiSettings = ApiSettings()
     logging: LoggingSettings = LoggingSettings()
     state: StateSettings = StateSettings()
     security: SecuritySettings = SecuritySettings()
+    scout: ScoutSettings = ScoutSettings()
+    preprocessor: PreprocessorSettings = PreprocessorSettings()
     git_enabled: bool = True
     git_only_tracked: bool = False
     indexer_workers: int = 4
     observability_metrics_enabled: bool = True
-    workspace_path: Path = Field(default_factory=lambda: Path(os.environ.get("HIVEMIND_WORKSPACE", os.getcwd())))
+    workspace_path: Path = Field(default_factory=lambda: Path(os.environ.get("HIVEMIND_WORKSPACE_PATH", os.getcwd())))
 
     @property
     def project_name(self) -> str:

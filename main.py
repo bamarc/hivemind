@@ -1,7 +1,7 @@
 import typer
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from rich.console import Console
 from rich.logging import RichHandler
 
@@ -186,6 +186,27 @@ def indexer_clean(
 
     console.print("\n[bold green]Index cleaned successfully![/bold green]")
     console.print(f"You can now reindex everything by running: [cyan]hivemind indexer start .[/cyan]")
+
+# Scout Subcommand
+scout_app = typer.Typer(help="Manage the web scout (crawler).", no_args_is_help=True)
+app.add_typer(scout_app, name="scout")
+
+@scout_app.command("crawl")
+def scout_crawl(
+    urls: Optional[List[str]] = typer.Argument(None, help="Specific URLs to scout."),
+    recursive: bool = typer.Option(False, "--recursive", "-r", help="Perform recursive crawling."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging.")
+):
+    """Crawl web content and save it for indexing."""
+    from scout.manager import ScoutManager
+    from core.config import settings
+    import asyncio
+    
+    level = "DEBUG" if verbose else settings.logging.level
+    setup_logging(level, settings.logging.file_path)
+    
+    manager = ScoutManager(console=console)
+    asyncio.run(manager.run(urls, recursive=recursive))
 
 # Search Subcommand
 @app.command("search", no_args_is_help=True)
