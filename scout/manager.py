@@ -95,6 +95,12 @@ class ScoutManager:
             task = progress.add_task("[green]Scouting...", total=len(target_urls))
             
             for url in target_urls:
+                # Basic URL validation to avoid passing junk to crawl4ai
+                if not any(url.startswith(scheme) for scheme in ["http://", "https://", "file://", "raw:"]):
+                    logger.warning(f"Skipping invalid URL: '{url}'. URLs must start with http://, https://, etc.")
+                    progress.update(task, advance=1)
+                    continue
+
                 progress.update(task, description=f"[cyan]Scouting: [dim]{url}[/dim]")
                 
                 if is_recursive:
