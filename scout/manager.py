@@ -68,7 +68,7 @@ class ScoutManager:
         except Exception as e:
             logger.error(f"Failed to save {page_url} to {file_path}: {e}")
 
-    async def run(self, urls: Optional[List[str]] = None, recursive: Optional[bool] = None, max_pages: Optional[int] = None):
+    async def run(self, urls: Optional[List[str]] = None, recursive: Optional[bool] = None, max_pages: Optional[int] = None, stay_in_path: bool = False):
         """Run the scout on the provided URLs or from config."""
         target_urls = urls or settings.scout.urls
         is_recursive = recursive if recursive is not None else settings.scout.recursive
@@ -101,7 +101,8 @@ class ScoutManager:
                     # For recursive, we get a list of results
                     scanned_pages = await self.crawler.crawl_recursive(
                         url, 
-                        max_pages=limit
+                        max_pages=limit,
+                        stay_in_path=stay_in_path
                     )
                     
                     for page_url, content in scanned_pages:

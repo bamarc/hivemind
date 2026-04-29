@@ -197,6 +197,7 @@ def scout_crawl(
     recursive: bool = typer.Option(False, "--recursive", "-r", help="Perform recursive crawling."),
     max_pages: Optional[int] = typer.Option(None, "--max-pages", "-m", help="Max pages to crawl (overrides config)."),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Root directory for saved markdown files."),
+    stay_in_path: bool = typer.Option(False, "--stay-in-path", "-p", help="Only follow URLs that start with the seed URL path."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging.")
 ):
     """Crawl web content and save it for indexing."""
@@ -208,7 +209,7 @@ def scout_crawl(
     setup_logging(level, settings.logging.file_path)
     
     manager = ScoutManager(console=console, output_dir=output_dir)
-    asyncio.run(manager.run(urls, recursive=recursive, max_pages=max_pages))
+    asyncio.run(manager.run(urls, recursive=recursive, max_pages=max_pages, stay_in_path=stay_in_path))
 
 # Search Subcommand
 @app.command("search", no_args_is_help=True)

@@ -6,6 +6,7 @@ from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 from crawl4ai.content_filter_strategy import PruningContentFilter
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +57,25 @@ class ScoutCrawler:
                     logger.error(f"Error crawling {url}: {e}")
         return results
 
-    async def crawl_recursive(self, url: str, max_pages: int = 50, max_depth: int = 3) -> List[tuple[str, str]]:
+    async def crawl_recursive(self, url: str, max_pages: int = 50, max_depth: int = 3, stay_in_path: bool = False) -> List[tuple[str, str]]:
         """Perform recursive crawling starting from a seed URL."""
-        logger.info(f"Scouting recursively starting from: {url} (max pages: {max_pages}, max depth: {max_depth})")
+        logger.info(f"Scouting recursively starting from: {url} (max pages: {max_pages}, max depth: {max_depth}, stay_in_path: {stay_in_path})")
         results = []
         
         try:
+            # Setup path filter if requested
+            filter_chain = None
+            if stay_in_path:
+                # Use a wildcard to match any URL starting with the seed URL
+                # We handle both with and without trailing slash for the base
+                pattern = f"*{url.rstrip('/')}*"
+                filter_chain = FilterChain([URLPatternFilter(patterns=[pattern])])
+
             strategy = BFSDeepCrawlStrategy(
                 max_depth=max_depth, 
                 max_pages=max_pages,
-                include_external=False
+                include_external=False,
+                filter_chain=filter_chain
             )
             
             # Create a specific config for this recursive run that includes the strategy
