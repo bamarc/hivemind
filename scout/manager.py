@@ -24,10 +24,11 @@ class ScoutManager:
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         return f"{domain}_{url_hash}.md"
 
-    async def run(self, urls: Optional[List[str]] = None, recursive: Optional[bool] = None):
+    async def run(self, urls: Optional[List[str]] = None, recursive: Optional[bool] = None, max_pages: Optional[int] = None):
         """Run the scout on the provided URLs or from config."""
         target_urls = urls or settings.scout.urls
         is_recursive = recursive if recursive is not None else settings.scout.recursive
+        limit = max_pages or settings.scout.max_pages_per_domain
         
         if not target_urls:
             self.console.print("[yellow]No URLs to scout. Add them to config.yaml or provide via CLI.[/yellow]")
@@ -56,7 +57,7 @@ class ScoutManager:
                     # For recursive, we get a list of results
                     scanned_pages = await self.crawler.crawl_recursive(
                         url, 
-                        max_pages=settings.scout.max_pages_per_domain
+                        max_pages=limit
                     )
                     
                     for page_url, content in scanned_pages:

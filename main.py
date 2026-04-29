@@ -195,6 +195,7 @@ app.add_typer(scout_app, name="scout")
 def scout_crawl(
     urls: Optional[List[str]] = typer.Argument(None, help="Specific URLs to scout."),
     recursive: bool = typer.Option(False, "--recursive", "-r", help="Perform recursive crawling."),
+    max_pages: Optional[int] = typer.Option(None, "--max-pages", "-m", help="Max pages to crawl (overrides config)."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging.")
 ):
     """Crawl web content and save it for indexing."""
@@ -206,7 +207,7 @@ def scout_crawl(
     setup_logging(level, settings.logging.file_path)
     
     manager = ScoutManager(console=console)
-    asyncio.run(manager.run(urls, recursive=recursive))
+    asyncio.run(manager.run(urls, recursive=recursive, max_pages=max_pages))
 
 # Search Subcommand
 @app.command("search", no_args_is_help=True)
@@ -349,7 +350,12 @@ def api_serve(
     console.print(f"[bold green]Starting Hivemind API on {host or settings.api.host}:{port or settings.api.port}[/bold green]")
     run_api(host=host, port=port)
 
-# Init Subcommand
+@app.command("setup")
+def setup():
+    """Run the interactive setup wizard to configure Hivemind."""
+    from cli.setup import setup_wizard
+    setup_wizard()
+
 @app.command("init", no_args_is_help=False)
 def init_project():
     """Initialize a Hivemind project configuration for the current directory."""
