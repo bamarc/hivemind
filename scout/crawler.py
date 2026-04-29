@@ -71,12 +71,16 @@ class ScoutCrawler:
                 pattern = f"*{url.rstrip('/')}*"
                 filter_chain = FilterChain([URLPatternFilter(patterns=[pattern])])
 
-            strategy = BFSDeepCrawlStrategy(
-                max_depth=max_depth, 
-                max_pages=max_pages,
-                include_external=False,
-                filter_chain=filter_chain
-            )
+            # Strategy parameters
+            strategy_kwargs = {
+                "max_depth": max_depth,
+                "max_pages": max_pages,
+                "include_external": False
+            }
+            if filter_chain:
+                strategy_kwargs["filter_chain"] = filter_chain
+
+            strategy = BFSDeepCrawlStrategy(**strategy_kwargs)
             
             # Create a specific config for this recursive run that includes the strategy
             recursive_config = CrawlerRunConfig(
