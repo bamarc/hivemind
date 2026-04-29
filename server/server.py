@@ -1,8 +1,10 @@
 import sys
 import logging
 from mcp.server.fastmcp import FastMCP
-from core.clients import db, get_embedding
+from core.clients import db, get_embedding, chat_client
 from core.config import settings
+from core.complexity import get_complexity
+from core.planner import generate_blueprint as core_generate_blueprint
 
 # Configure logging to stderr for MCP
 logging.basicConfig(
@@ -219,7 +221,80 @@ def start_indexing(root_path: str = None) -> str:
         return f"Indexing started for {root} (PID: {p.pid}). Use get_index_status to check progress."
     except Exception as e:
         logger.error(f"Error starting indexer: {e}")
-        return f"Error starting indexer for {root}: {str(e)}"
+@mcp.tool()
+def analyze_code_complexity(filepath: str) -> str:
+    """
+    Calculate complexity metrics for a file (AST depth, dependencies, etc.).
+    Use this to decide if a task should be handled by a small or flagship model.
+    """
+    import json
+    result = get_complexity(filepath)
+    if "error" in result:
+        return f"Error: {result['error']}"
+    
+    # Format for readability
+    score = result['complexity_score']
+    triage = "Escalate to Flagship" if score > 50 else "Suitable for Small/Local Model"
+    
+    return (
+        f"## Complexity Analysis: {os.path.basename(filepath)}\n"
+        f"- **Score**: {score} ({triage})\n"
+        f"- **AST Depth**: {result['max_depth']}\n"
+        f"- **Definitions**: {result['def_count']}\n"
+        f"- **Imports**: {result['import_count']}\n"
+        f"- **Lines**: {result['line_count']}\n"
+    )
+
+@mcp.tool()
+def generate_blueprint(task: str, context: str) -> str:
+    """
+    Generate a structured JSON blueprint for a coding task using a flagship model.
+    """
+    import json
+    blueprint = core_generate_blueprint(task, context)
+    return json.dumps(blueprint, indent=2)
+
+@mcp.tool()
+def run_verification(filepath: str = None) -> str:
+    """
+    Run linters and tests for the project or a specific file.
+    """
+    import subprocess
+    import os
+    
+    root = settings.workspace_path
+    
+    # Detect project type
+    if (root / "package.json").exists():
+        cmd = ["npm", "test"]
+    elif (root / "pyproject.toml").exists() or (root / "pytest.ini").exists():
+        cmd = ["uv", "run", "pytest"]
+        if filepath:
+            cmd.append(filepath)
+    else:
+        return "Error: Could not detect test runner (no package.json or pyproject.toml found)."
+        
+    try:
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            cwd=str(root),
+            timeout=60
+        )
+        
+        status = "PASSED" if result.returncode == 0 else "FAILED"
+        output = result.stdout + result.stderr
+        
+        # Keep output concise
+        if len(output) > 2000:
+            output = output[:1000] + "\n... [TRUNCATED] ...\n" + output[-1000:]
+            
+        return f"### Verification {status}\nCommand: `{' '.join(cmd)}`\n\n```\n{output}\n```"
+    except subprocess.TimeoutExpired:
+        return "Error: Verification timed out after 60 seconds."
+    except Exception as e:
+        return f"Error running verification: {str(e)}"
 
 def run_mcp():
     """Entry point for MCP server."""

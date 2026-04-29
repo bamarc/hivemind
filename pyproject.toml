@@ -5,12 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "crawl4ai>=0.8.6",
     "fastapi>=0.115.0",
     "mcp>=1.0.0",
     "openai>=2.32.0",
     "pathspec>=1.1.0",
+    "playwright>=1.58.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pypdf>=6.10.2",
     "pyyaml>=6.0.0",
     "qdrant-client>=1.17.1",
     "rich>=13.0.0",
@@ -30,5 +33,10 @@ dependencies = [
 hivemind = "main:cli"
 
 [tool.setuptools]
-packages = ["indexer", "indexer.chunkers", "core", "server", "cli"]
+packages = ["indexer", "indexer.chunkers", "indexer.preprocessors", "core", "server", "cli", "scout"]
 py-modules = ["main"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

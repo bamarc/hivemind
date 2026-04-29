@@ -1,12 +1,13 @@
 from typing import List, Dict, Any, Optional
+from .base import ChunkingStrategy, Chunk
 from tree_sitter import Language, Parser
 import tree_sitter_python as tspython
 import tree_sitter_go as tsgo
 import tree_sitter_typescript as tstypescript
 import tree_sitter_yaml as tsyaml
 import tree_sitter_hcl as tshcl
-from .base import ChunkingStrategy, Chunk
 import os
+import re
 
 class ASTChunker(ChunkingStrategy):
     def __init__(self, chunk_lines: int = 50, overlap_lines: int = 5):
@@ -24,7 +25,16 @@ class ASTChunker(ChunkingStrategy):
             ".tf": Language(tshcl.language())
         }
         self.parser = Parser()
+        
+        # Sanitization patterns
+        self.base64_pattern = re.compile(r'([A-Za-z0-9+/]{100,}=*)')
+        self.long_string_pattern = re.compile(r'("[^"]{500,}"|\'[^\']{500,}\')')
 
+    def sanitize_content(self, text: str) -> str:
+        """Strip 'noise' like base64 payloads or excessively long strings."""
+        text = self.base64_pattern.sub("[BASE64_DATA_STRIPPED]", text)
+        text = self.long_string_pattern.sub("[LONG_STRING_STRIPPED]", text)
+        return text
     def _get_node_name(self, node) -> Optional[str]:
         """Extract a human-readable name for a definition node."""
         for child in node.children:
@@ -146,8 +156,11 @@ class ASTChunker(ChunkingStrategy):
                     "symbols": [name] if name else []
                 }
                 
+                # Sanitize before chunking
+                sanitized_text = self.sanitize_content(node_text)
+                
                 node_chunks = self._create_chunks_from_text(
-                    node_text, filepath, start_line, current_idx, metadata
+                    sanitized_text, filepath, start_line, current_idx, metadata
                 )
                 chunks.extend(node_chunks)
                 current_idx += len(node_chunks)

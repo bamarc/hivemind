@@ -22,6 +22,7 @@ from .chunkers.by_lines import ByLinesChunker
 from .chunkers.ast import ASTChunker
 from .chunkers.markdown import MarkdownChunker
 from .git_utils import GitManager
+from .preprocessors.manager import PreprocessorManager
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class IndexWorker(threading.Thread):
         self.task_queue = task_queue
         self.state_manager = state_manager
         self.git_manager = git_manager
+        self.preprocessor_manager = PreprocessorManager()
         
         # Select chunker based on config
         if settings.chunking.strategy == "by_lines":
@@ -98,11 +100,14 @@ class IndexWorker(threading.Thread):
         
         # 1. Read and Chunk
         t0 = time.perf_counter()
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
         
-        # Use specialized markdown chunker for .md files
-        if filepath.suffix == ".md":
+        content = self.preprocessor_manager.preprocess(filepath)
+        if content is None:
+            logger.error(f"Failed to preprocess or read file: {filepath}")
+            return
+        
+        # Use specialized markdown chunker for .md files or pre-processed content that looks like markdown
+        if filepath.suffix == ".md" or content.startswith("---") or content.startswith("# "):
             chunks = self.markdown_chunker.chunk(content, str(filepath))
         else:
             chunks = self.chunker.chunk(content, str(filepath))
@@ -186,10 +191,8 @@ class CodeHandler(FileSystemEventHandler):
     def __init__(self, task_queue: queue.Queue, git_manager: Optional[GitManager] = None):
         self.task_queue = task_queue
         self.git_manager = git_manager
-        self.extensions = (
-            '.py', '.go', '.js', '.ts', '.md', '.txt', '.yaml', '.yml', '.toml',
-            '.c', '.h', '.adoc', '.tsx', '.css', '.scss', '.tf', '.sh', '.conf'
-        )
+        self.preprocessor_manager = PreprocessorManager()
+        self.extensions = self.preprocessor_manager.supported_extensions
         self.filenames = ('Dockerfile',)
 
     def _should_handle(self, filepath: Path) -> bool:
@@ -222,6 +225,7 @@ class Indexer:
         self.state_manager = StateManager(settings.state.directory)
         self.git_manager = GitManager(Path.cwd()) if settings.git_enabled else None
         self.console = console or Console()
+        self.preprocessor_manager = PreprocessorManager()
         
         self.workers = []
         for _ in range(settings.indexer_workers):
@@ -301,10 +305,7 @@ class Indexer:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     def _scan_directory(self, path: Path):
-        extensions = (
-            '.py', '.go', '.js', '.ts', '.md', '.txt', '.yaml', '.yml', '.toml',
-            '.c', '.h', '.adoc', '.tsx', '.css', '.scss', '.tf', '.sh', '.conf'
-        )
+        extensions = self.preprocessor_manager.supported_extensions
         filenames = ('Dockerfile',)
         
         files_to_index = []
