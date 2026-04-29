@@ -4,15 +4,21 @@ set -e
 echo "🚀 Updating Hivemind..."
 
 # 1. Update the hivemind tool. 
-# --force is necessary to overwrite the existing tool installation with your local changes.
-# uv is smart enough to reuse cached dependencies, so this is fast.
-uv tool install --force .
+# We explicitly uninstall first to ensure a clean state for local updates.
+echo "📦 Cleaning old installation..."
+uv tool uninstall hivemind || true
+uv tool install .
 
-# 2. Install Playwright browsers.
-# We use 'uv run' to ensure we use the exact version specified in pyproject.toml.
+# 2. Install Playwright browsers if missing.
+# We check the default cache location for existing browser binaries.
 echo "🌐 Checking Playwright browsers..."
-uv run playwright install --with-deps
+if [ ! -d "$HOME/.cache/ms-playwright" ] || [ -z "$(ls -A $HOME/.cache/ms-playwright 2>/dev/null)" ]; then
+    echo "📥 Installing browsers and system dependencies..."
+    uv run playwright install --with-deps
+else
+    echo "✅ Browsers already present in ~/.cache/ms-playwright"
+fi
 
-echo "✅ Hivemind is ready!"
+echo "✨ Hivemind is ready!"
 
 
