@@ -62,13 +62,23 @@ class ScoutCrawler:
         results = []
         
         try:
-            strategy = BFSDeepCrawlStrategy(max_depth=max_depth, max_pages=max_pages)
+            strategy = BFSDeepCrawlStrategy(
+                max_depth=max_depth, 
+                max_pages=max_pages,
+                include_external=False
+            )
+            
+            # Create a specific config for this recursive run that includes the strategy
+            recursive_config = CrawlerRunConfig(
+                markdown_generator=self.run_config.markdown_generator,
+                deep_crawl_strategy=strategy
+            )
+
             async with AsyncWebCrawler() as crawler:
-                # arun returns a single list of CrawlResult when strategy is provided
+                # arun returns a single list of CrawlResult when strategy is provided in config
                 crawl_results = await crawler.arun(
                     url, 
-                    config=self.run_config,
-                    deep_crawl_strategy=strategy
+                    config=recursive_config
                 )
                 
                 if isinstance(crawl_results, list):
