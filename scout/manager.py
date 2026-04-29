@@ -12,17 +12,61 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 logger = logging.getLogger(__name__)
 
 class ScoutManager:
-    def __init__(self, console: Optional[Console] = None):
+    def __init__(self, console: Optional[Console] = None, output_dir: Optional[Path] = None):
         self.console = console or Console()
         self.crawler = ScoutCrawler(content_filter=settings.scout.content_filter)
-        self.output_dir = settings.workspace_path / settings.scout.output_directory
+        self.output_dir = output_dir or (settings.workspace_path / settings.scout.output_directory)
 
-    def _url_to_filename(self, url: str) -> str:
-        """Convert URL to a safe filename."""
-        # Use MD5 of URL to keep it short but unique, prefixed with domain
-        domain = url.split("//")[-1].split("/")[0].replace(".", "_")
-        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-        return f"{domain}_{url_hash}.md"
+    def _url_to_path(self, url: str) -> Path:
+        """Convert URL to a structured path relative to output_dir."""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        
+        # 1. Domain as root folder
+        domain = parsed.netloc.replace(".", "_")
+        
+        # 2. Path segments
+        url_path = parsed.path.strip("/")
+        if not url_path:
+            url_path = "index"
+        elif parsed.path.endswith("/"):
+            url_path = f"{url_path}/index"
+            
+        # 3. Handle query params to avoid collisions for same path
+        if parsed.query:
+            query_hash = hashlib.md5(parsed.query.encode()).hexdigest()[:6]
+            url_path = f"{url_path}_{query_hash}"
+            
+        return Path(domain) / f"{url_path}.md"
+
+    def _save_page(self, page_url: str, content: str, seed_url: Optional[str] = None):
+        """Save crawled content to a structured file path."""
+        if not content:
+            return
+
+        rel_path = self._url_to_path(page_url)
+        file_path = self.output_dir / rel_path
+        
+        # Handle filename conflicts
+        if file_path.exists():
+            # Add a small hash of the full URL to distinguish
+            url_hash = hashlib.md5(page_url.encode()).hexdigest()[:4]
+            file_path = file_path.with_name(f"{file_path.stem}_{url_hash}{file_path.suffix}")
+
+        # Ensure parent directories exist
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        full_content = f"---\nsource_url: {page_url}\n"
+        if seed_url:
+            full_content += f"seed_url: {seed_url}\n"
+        full_content += "---\n\n" + content
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(full_content)
+            logger.info(f"Saved {page_url} to {file_path}")
+        except Exception as e:
+            logger.error(f"Failed to save {page_url} to {file_path}: {e}")
 
     async def run(self, urls: Optional[List[str]] = None, recursive: Optional[bool] = None, max_pages: Optional[int] = None):
         """Run the scout on the provided URLs or from config."""
@@ -33,11 +77,11 @@ class ScoutManager:
         if not target_urls:
             self.console.print("[yellow]No URLs to scout. Add them to config.yaml or provide via CLI.[/yellow]")
             return
-
+ 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.console.print(f"[bold cyan]Scout starting for {len(target_urls)} URLs...[/bold cyan]")
         self.console.print(f"[dim]Output directory: {self.output_dir}[/dim]")
-
+ 
         progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -46,7 +90,7 @@ class ScoutManager:
             console=self.console,
             expand=True
         )
-
+ 
         with progress:
             task = progress.add_task("[green]Scouting...", total=len(target_urls))
             
@@ -61,23 +105,11 @@ class ScoutManager:
                     )
                     
                     for page_url, content in scanned_pages:
-                        if content:
-                            filename = self._url_to_filename(page_url)
-                            file_path = self.output_dir / filename
-                            full_content = f"---\nsource_url: {page_url}\nseed_url: {url}\n---\n\n{content}"
-                            with open(file_path, "w", encoding="utf-8") as f:
-                                f.write(full_content)
-                            logger.info(f"Saved {page_url} to {file_path}")
+                        self._save_page(page_url, content, seed_url=url)
                 else:
                     # Single page crawl
                     content = await self.crawler.crawl_url(url)
-                    if content:
-                        filename = self._url_to_filename(url)
-                        file_path = self.output_dir / filename
-                        full_content = f"---\nsource_url: {url}\n---\n\n{content}"
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(full_content)
-                        logger.info(f"Saved {url} to {file_path}")
+                    self._save_page(url, content)
                 
                 progress.update(task, advance=1)
 
