@@ -13,10 +13,15 @@ db = QdrantClient(
     api_key=settings.qdrant.api_key.get_secret_value() if settings.qdrant.api_key else None
 )
 
-# OpenAI / LM Studio Client
+# OpenAI / LM Studio Clients
 embedder = OpenAI(
     base_url=settings.model.api_url,
     api_key=settings.model.api_key.get_secret_value() if settings.model.api_key else "empty"
+)
+
+chat_client = OpenAI(
+    base_url=settings.chat.api_url,
+    api_key=settings.chat.api_key.get_secret_value() if settings.chat.api_key else "empty"
 )
 
 @retry(

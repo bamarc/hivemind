@@ -8,8 +8,13 @@ qdrant:
 model:
   api_url: "http://localhost:1234/v1"
   model_name: "qwen3-4B-embedding"
-  # api_key: "sk-lm-mvxiR7RH:jaECEpnuouH8QMcagX6U"
+  # api_key: "your-api-key"
   embedding_dim: 2500
+
+chat:
+  api_url: "http://localhost:1234/v1"
+  model_name: "gpt-4o"
+  # api_key: "your-api-key"
 
 chunking:
   strategy: "by_size"
@@ -17,6 +22,21 @@ chunking:
   by_size:
     chunk_size: 500
     overlap: 50
+  by_lines:
+    chunk_lines: 50
+    overlap_lines: 5
+  ast:
+    chunk_lines: 50
+    overlap_lines: 5
+
+scout:
+  urls:
+    - "https://docs.crawl4ai.com"
+    - "https://qdrant.tech/documentation"
+  output_directory: "docs/scout"
+  recursive: false
+  content_filter: true
+  max_pages_per_domain: 50
 
 api:
   host: "0.0.0.0"
