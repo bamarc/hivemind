@@ -23,13 +23,31 @@ Example: `HIVEMIND_QDRANT__URL="http://192.168.1.100:6333"`
 | `api_key` | `null` | API Key for Qdrant (if enabled). |
 | `collection_name` | `hivemind_code` | Name of the collection in Qdrant. |
 
-### Model
+### Embedding (`model`)
 | Key | Default | Description |
 |-----|---------|-------------|
 | `api_url` | `http://localhost:1234/v1` | URL of the OpenAI-compatible embedding API. |
-| `model_name` | `qwen3-4B-embedding` | Name of the model to use. |
+| `model_name` | `qwen3-4B-embedding` | Name of the embedding model. |
 | `api_key` | `hivemind` | API Key for the embedding service. |
 | `embedding_dim` | `2500` | Dimension of the generated vectors. |
+| `batch_size` | `100` | Batch size for embedding requests. |
+
+### Chat (`chat`)
+| Key | Default | Description |
+|-----|---------|-------------|
+| `api_url` | `http://localhost:1234/v1` | URL of the OpenAI-compatible chat API (for planning). |
+| `model_name` | `gpt-4o` | Name of the flagship model for blueprint generation. |
+| `api_key` | `null` | API Key for the chat service. |
+
+### Scout (`scout`)
+| Key | Default | Description |
+|-----|---------|-------------|
+| `urls` | `[]` | Seed URLs to scout for documentation. |
+| `output_directory` | `docs/scout` | Where to save crawled markdown. |
+| `recursive` | `false` | Enable recursive crawling (following links). |
+| `max_pages_per_domain` | `50` | Max pages to crawl per domain. |
+| `content_filter` | `true` | Enable noise removal from crawled pages. |
+| `exclude_patterns` | `[...]` | Glob patterns to exclude (e.g., login, pricing). |
 
 ### Chunking
 | Key | Default | Description |

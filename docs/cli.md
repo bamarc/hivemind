@@ -15,10 +15,18 @@ Starts the code ingestion process.
     *   `--watch / --no-watch`: Enable/disable file system watching (default: watch).
     *   `--verbose`: Show detailed indexing logs.
 
-### `indexer clean`
-Wipes the local state and Qdrant collection for the current project. Useful for forced reindexing.
+### `indexer clean` (alias: `clear`)
+Wipes the local state AND the Qdrant collection for the current project.
 *   **Options**:
     *   `--force`, `-f`: Skip confirmation prompt.
+
+### `scout crawl [urls...]`
+Crawl web documentation and save it for indexing.
+*   **Arguments**:
+    *   `[urls...]`: Optional list of specific URLs to crawl.
+*   **Options**:
+    *   `--recursive`, `-r`: Enable recursive crawling (follows internal links).
+    *   `--verbose`: Show detailed crawling logs.
 
 ### `search <query>`
 Perform a semantic search from the terminal.
