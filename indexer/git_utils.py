@@ -33,7 +33,7 @@ class GitManager:
         try:
             with open(gitignore_path, "r") as f:
                 lines = f.readlines()
-            return pathspec.PathSpec.from_lines("gitwildmatch", lines)
+            return pathspec.PathSpec.from_lines("gitignore", lines)
         except Exception as e:
             logger.error(f"Failed to load .gitignore: {e}")
             return None
