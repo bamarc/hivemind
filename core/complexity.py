@@ -95,7 +95,7 @@ def get_complexity(filepath: str) -> Dict[str, Any]:
     import_types = {
         "python": ("import_statement", "import_from_statement"),
         "go": ("import_declaration",),
-        "typescript": ("import_declaration",)
+        "typescript": ("import_statement",)
     }
     target_imports = import_types.get(lang_name, ())
     
