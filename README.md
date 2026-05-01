@@ -70,6 +70,12 @@ If you just want to install/update the `hivemind` tool globally without a wizard
    hivemind search "how does the auth logic work?"
    ```
 
+## Security Disclaimer
+
+**Hivemind is not hardened against prompt injection.** The MCP server executes tools based on instructions from AI agents, which may be influenced by untrusted content (e.g., web pages crawled via `scout_urls` or `deep_research`, or code files indexed from a repository). An attacker who can inject malicious instructions into crawled content could potentially trick the agent into performing unintended operations.
+
+By using Hivemind, you acknowledge and accept this risk. The authors and contributors provide this software "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors or contributors be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)

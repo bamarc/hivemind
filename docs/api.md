@@ -9,10 +9,11 @@ Hivemind exposes custom MCP (Model Context Protocol) tools for AI agents. These 
 | Priority | Tool | When to Use |
 |----------|------|-------------|
 | 🥇 | `semantic_code_search` | **Always first.** Find code by meaning, not filename. Use natural language queries. |
+| 🥇 | `deep_research` | **Web research in one call.** Combines `search_web` + `scout_urls` — searches the web, crawls top results, returns chunk-truncated markdown. |
 | 🥈 | `get_file_tree` | Only for structural overview. Do NOT use to find specific logic. |
 | 🥈 | `search_web` | Search the internet for documentation, API references, or solutions. |
 | 🥈 | `scout_urls` | Crawl URLs (from `search_web` results) to get full page markdown content. |
-| � | `read_file` | Read file contents with line numbers and slicing. Use when `semantic_code_search` is insufficient. |
+| 🥈 | `read_file` | Read file contents with line numbers and slicing. Use when `semantic_code_search` is insufficient. |
 | 🥉 | `get_git_history` | Get last commit metadata (author, date, message) for any file. |
 | 🥉 | `analyze_code_complexity` | After finding a file, to determine if a small or flagship model should handle it. |
 | 🥉 | `generate_blueprint` | For architectural planning before implementing complex features. |
@@ -29,6 +30,17 @@ Hivemind exposes custom MCP (Model Context Protocol) tools for AI agents. These 
   - `file_filter` (optional): Substring filter on file paths (e.g., `"server/"`).
   - `language` (optional): Language filter (e.g., `"python"`, `"typescript"`).
   - `is_test` (optional): `true` for only test files, `false` to exclude them.
+
+### `deep_research`
+
+**Combine web search + crawling into a single action.** Searches DuckDuckGo for the query, grabs the top URLs, crawls them concurrently, and returns the content as chunk-truncated markdown. This saves an extra round-trip compared to calling `search_web` then `scout_urls` separately.
+
+- **Parameters:**
+  - `query` (required): Natural language research query (e.g., `"Python asyncio gather docs"`).
+  - `max_results` (optional, default 3): Maximum number of search results to consider (capped at 10).
+  - `max_urls` (optional, default 3): Maximum number of URLs to crawl from results (capped at 5).
+
+- **Requires:** `ddgs`, `crawl4ai`, and `playwright`. Install with `uv sync --extra scout` then `playwright install chromium`.
 
 ### `get_file_tree`
 
@@ -87,11 +99,11 @@ Supports a **Map-Reduce** pattern for large pages: first request a Table of Cont
     - `"full"` — Returns raw markdown content (backward compatible). If content exceeds ~8000 chars, shows an excerpt with a hint to use `mode="toc"`.
     - `"toc"` — Crawls the URL, splits content into sections via the MarkdownChunker, caches chunks in memory, and returns a Table of Contents showing section names, heading levels, line ranges, and estimated token counts. No raw content is returned.
     - `"sections"` — Reads previously cached chunks and returns content only for the sections named in the `sections` parameter. Falls back to re-crawling if cache is empty.
-  - `sections` (optional, default `None`): List of section names or numeric indices to retrieve when `mode="sections"`. Matches are case-insensitive substring matches against header text (e.g., `["Conversation", "Checks"]` for a GitHub PR). Mutually exclusive with `mode="full"`.
+  - `sections` (optional, default `None`): Dictionary mapping URLs to lists of section names or numeric indices to retrieve when `mode="sections"`. Keys must match URLs passed in the `urls` parameter. Section names are matched case-insensitively as substrings against header text (e.g., `{"https://github.com/org/repo/pull/123": ["Conversation", "Checks"]}`). Pass `None` or `{}` to request no sections for any URL.
 
 - **Usage flow for large pages:**
   1. `scout_urls(["https://github.com/org/repo/pull/123"], mode="toc")` → get TOC
-  2. `scout_urls(["https://github.com/org/repo/pull/123"], mode="sections", sections=["Conversation", "Checks"])` → get only relevant sections (~4500 tokens instead of 22000+)
+  2. `scout_urls(["https://github.com/org/repo/pull/123"], mode="sections", sections={"https://github.com/org/repo/pull/123": ["Conversation", "Checks"]})` → get only relevant sections (~4500 tokens instead of 22000+)
 
 - **Requires:** `crawl4ai` and `playwright`. Install with `uv sync --extra scout` then `playwright install chromium`.
 
