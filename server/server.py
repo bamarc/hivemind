@@ -348,7 +348,7 @@ async def scout_urls(
     urls: list[str],
     max_results: int = 3,
     mode: str = "full",
-    sections: list[str] | None = None,
+    sections: dict[str, list[str]] | None = None,
 ) -> str:
     """
     Crawl one or more URLs and return their content as markdown.
@@ -367,9 +367,11 @@ async def scout_urls(
         mode: One of ``"full"`` (default, raw markdown with truncation),
             ``"toc"`` (Table of Contents only), or ``"sections"`` (chunks
             matching the ``sections`` parameter).
-        sections: Section names or indices to retrieve when ``mode="sections"``.
-            Matches against header text (case-insensitive substring) and
-            numeric index from the TOC.
+        sections: Dictionary mapping URLs to lists of section names or indices
+            to retrieve when ``mode="sections"``. Keys must match URLs passed
+            in the ``urls`` parameter. Section names match against header text
+            (case-insensitive substring) and numeric index from the TOC.
+            Example: ``{"https://docs.python.org/3/": ["Installation", "Usage"]}``
     """
     try:
         from scout.crawler import ScoutCrawler
@@ -397,8 +399,14 @@ async def scout_urls(
         cache = get_chunk_cache()
         section_results: list[str] = []
 
+        # Normalise sections dict: allow None or empty dict as "no sections for any URL"
+        url_sections: dict[str, list[str]] = sections or {}
+
         for url in urls:
-            cached = cache.get_sections(url, sections or [])
+            # Look up sections for this specific URL
+            url_section_list = url_sections.get(url, [])
+
+            cached = cache.get_sections(url, url_section_list)
             if cached is not None:
                 section_results.append(cached)
             else:
@@ -414,7 +422,7 @@ async def scout_urls(
                         chunker = MarkdownChunker()
                         chunks = chunker.chunk(content, url)
                         cache.store(url, chunks)
-                        cached = cache.get_sections(url, sections or [])
+                        cached = cache.get_sections(url, url_section_list)
                         if cached:
                             section_results.append(cached)
                 except Exception as e:
@@ -491,6 +499,122 @@ async def scout_urls(
     except Exception as e:
         logger.error(f"Error in scout_urls: {e}")
         return f"Error crawling URLs: {str(e)}"
+
+
+@mcp.tool()
+async def deep_research(
+    query: str,
+    max_results: int = 3,
+    max_urls: int = 3,
+) -> str:
+    """
+    Search the web, crawl the top results, and return chunk-truncated markdown.
+
+    Combines search_web and scout_urls into a single action. Searches
+    DuckDuckGo for the query, grabs the top URLs, crawls them concurrently,
+    and returns the content as markdown.
+
+    Use this for research tasks where you need up-to-date information
+    from the web in a single call.
+
+    Args:
+        query: Natural language research query (e.g., "Python asyncio gather docs").
+        max_results: Maximum number of search results to consider (default 3, max 10).
+        max_urls: Maximum number of URLs to crawl from results (default 3, max 5).
+    """
+    try:
+        # Step 1: Search the web
+        search_results = core_search_web(query, max_results=max_results)
+
+        if not search_results:
+            return f"No web results found for: {query}"
+
+        # Step 2: Extract top URLs
+        urls = [r.url for r in search_results[:max_urls] if r.url]
+
+        if not urls:
+            return f"No valid URLs found in search results for: {query}"
+
+        # Step 3: Try importing scout dependencies
+        try:
+            from scout.crawler import ScoutCrawler
+        except ImportError:
+            return (
+                "Error: Scout dependencies are not installed.\n\n"
+                "The deep_research tool requires 'crawl4ai' and 'playwright'.\n"
+                "Install with: `uv sync --extra scout`\n"
+                "Then run: `playwright install chromium`"
+            )
+
+        # Step 4: Crawl all URLs concurrently
+        crawler = ScoutCrawler()
+        crawl_results: list[tuple[str, str]] = []
+
+        async for url, content in crawler.crawl_batch(urls):
+            crawl_results.append((url, content))
+
+        if not crawl_results:
+            return f"Failed to crawl any of the URLs for query: {query}"
+
+        # Step 5: Chunk + cache
+        from indexer.chunkers.markdown import MarkdownChunker
+        from scout.chunk_cache import get_chunk_cache
+
+        chunker = MarkdownChunker()
+        cache = get_chunk_cache()
+
+        for url, content in crawl_results:
+            chunks = chunker.chunk(content, url)
+            cache.store(url, chunks)
+
+        # Step 6: Format results (search results header + chunk-truncated content)
+        lines = [
+            f"# Deep Research: {query}\n",
+            "## Search Results\n",
+        ]
+        for i, r in enumerate(search_results[:max_urls], 1):
+            lines.append(f"{i}. **{r.title}** — {r.url}")
+            lines.append(f"   > {r.snippet}")
+            lines.append("")
+
+        lines.append("---\n")
+        lines.append("## Crawled Content\n")
+
+        for url, content in crawl_results:
+            lines.append(f"---")
+            lines.append(f"### Source: {url}\n")
+            # Chunk-aware truncation (same as scout_urls full mode)
+            if len(content) > 8000:
+                chunks = cache.get(url)
+                if chunks and len(chunks) > 2:
+                    excerpt_lines = []
+                    excerpt_lines.append(chunks[0].content)
+                    excerpt_lines.append("")
+                    excerpt_lines.append(
+                        "... [TRUNCATED - page too large. "
+                        f"This page has {len(chunks)} sections. "
+                        "Use scout_urls with mode='toc' to browse sections, "
+                        "then mode='sections' to read specific sections.] ..."
+                    )
+                    excerpt_lines.append("")
+                    excerpt_lines.append(chunks[1].content)
+                    content = "\n".join(excerpt_lines)
+                else:
+                    content = content[:8000] + "\n\n... [TRUNCATED - page too large] ..."
+            lines.append(content)
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except ImportError as e:
+        return (
+            f"Error: {e}\n\n"
+            "The search_web tool requires the 'ddgs' package.\n"
+            "Install it with: `uv sync --extra scout`"
+        )
+    except Exception as e:
+        logger.error(f"Error in deep_research: {e}")
+        return f"Error performing deep research: {str(e)}"
 
 
 @mcp.tool()
