@@ -116,7 +116,7 @@ def setup_wizard():
         "scout": {
             "recursive": scout_recursive,
             "max_pages_per_domain": scout_pages,
-            "output_directory": "docs/scout",
+            "output_directory": ".hivemind/scout",
             "content_filter": True
         },
         "logging": {

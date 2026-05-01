@@ -7,7 +7,9 @@ Hivemind uses Pydantic Settings for flexible and type-safe configuration.
 Settings are loaded in the following order of precedence:
 
 1.  **Environment Variables**: Prefixed with `HIVEMIND_`.
-2.  **YAML File**: `config.yaml` in the current working directory.
+2.  **YAML Files** (in order):
+    * `.hivemind/config.yaml` — Project-local configuration in the `.hivemind` directory.
+    * `config.yaml` — Legacy project-local configuration in the workspace root.
 3.  **Defaults**: Defined in `core/config.py`.
 
 ### Environment Variables
@@ -43,7 +45,7 @@ Example: `HIVEMIND_QDRANT__URL="http://192.168.1.100:6333"`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `urls` | `[]` | Seed URLs to scout for documentation. |
-| `output_directory` | `docs/scout` | Where to save crawled markdown. |
+| `output_directory` | `.hivemind/scout` | Where to save crawled markdown (inside `.hivemind` directory). |
 | `recursive` | `false` | Enable recursive crawling (following links). |
 | `max_pages_per_domain` | `50` | Max pages to crawl per domain. |
 | `content_filter` | `true` | Enable noise removal from crawled pages. |
@@ -69,7 +71,7 @@ Example: `HIVEMIND_QDRANT__URL="http://192.168.1.100:6333"`
 ### State
 | Key | Default | Description |
 |-----|---------|-------------|
-| `directory` | `~/.hivemind` | Directory for state files and logs. |
+| `directory` | `.hivemind/state` | Directory for state files and logs (inside the `.hivemind` project directory). |
 
 ### Security
 | Key | Default | Description |

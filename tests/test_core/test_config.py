@@ -126,9 +126,9 @@ class TestSecuritySettings:
 
 class TestStateSettings:
     def test_directory_contains_hivemind(self):
-        """The default state directory should be under ``~/.hivemind``."""
+        """The default state directory should be ``.hivemind/state``."""
         s = StateSettings()
-        assert ".hivemind" in str(s.directory)
+        assert str(s.directory) == ".hivemind/state"
 
 
 class TestSettings:

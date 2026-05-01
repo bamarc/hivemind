@@ -42,7 +42,7 @@ def register(parent_app: typer.Typer):
             if "-d" in cmd: cmd.remove("-d")
 
             # Ensure we have a log file for output
-            log_file = settings.logging.file_path or Path(os.path.expanduser(f"~/.hivemind/{os.path.basename(os.getcwd())}/hivemind.log"))
+            log_file = settings.logging.file_path or Path(".hivemind/hivemind.log")
             log_file.parent.mkdir(parents=True, exist_ok=True)
 
             with open(log_file, "a") as f:

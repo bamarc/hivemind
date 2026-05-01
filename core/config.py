@@ -11,7 +11,7 @@ from pydantic_settings import (
 
 class ScoutSettings(BaseSettings):
     urls: List[str] = []
-    output_directory: str = "docs/scout"
+    output_directory: str = ".hivemind/scout"
     recursive: bool = False
     max_pages_per_domain: int = 50
     exclude_patterns: List[str] = ["*login*", "*signup*", "*cart*", "*pricing*"]
@@ -74,9 +74,7 @@ class LoggingSettings(BaseSettings):
 
 class StateSettings(BaseSettings):
     directory: Path = Field(
-        default_factory=lambda: Path(
-            os.path.expanduser(f"~/.hivemind/{os.path.basename(os.getcwd())}/state")
-        )
+        default_factory=lambda: Path(".hivemind/state")
     )
 
 class SecuritySettings(BaseSettings):
@@ -93,8 +91,7 @@ class Settings(BaseSettings):
         env_prefix="HIVEMIND_",
         env_nested_delimiter="__",
         yaml_file=(
-            os.path.expanduser("~/.hivemind/config.yaml"),
-            os.path.expanduser(f"~/.hivemind/{os.path.basename(os.getcwd())}/config.yaml"),
+            ".hivemind/config.yaml",
             "config.yaml"
         )
     )
