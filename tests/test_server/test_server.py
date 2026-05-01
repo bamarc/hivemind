@@ -17,6 +17,7 @@ import pytest
 # We import them directly and call them like normal functions.
 from server.server import (
     analyze_code_complexity,
+    deep_research,
     generate_blueprint,
     get_file_tree,
     get_git_history,
@@ -352,7 +353,7 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=["Installation"],
+            sections={"https://example.com": ["Installation"]},
         )
         assert "Selected Sections" in result
         assert "pip install" in result  # content from Installation chunk
@@ -364,7 +365,7 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=["2"],
+            sections={"https://example.com": ["2"]},
         )
         assert "Configuration" in result or "API key" in result
 
@@ -373,7 +374,7 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=["Installation", "Usage"],
+            sections={"https://example.com": ["Installation", "Usage"]},
         )
         assert "pip install" in result
         assert "foo --help" in result
@@ -383,7 +384,7 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=["installation"],
+            sections={"https://example.com": ["installation"]},
         )
         assert "pip install" in result
 
@@ -392,7 +393,7 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=["NonExistent"],
+            sections={"https://example.com": ["NonExistent"]},
         )
         assert "No sections matched" in result
         # Should list available sections
@@ -403,7 +404,40 @@ class TestScoutUrls:
         result = await scout_urls(
             ["https://example.com"],
             mode="sections",
-            sections=[],
+            sections={"https://example.com": []},
+        )
+        assert "No sections requested" in result
+
+    async def test_sections_mode_per_url_different_sections(self):
+        """Different URLs can request different sections."""
+        result = await scout_urls(
+            ["https://a.com", "https://b.com"],
+            mode="sections",
+            sections={
+                "https://a.com": ["Installation"],
+                "https://b.com": ["Usage"],
+            },
+        )
+        assert "Installation" in result or "pip install" in result
+        # Each URL's sections should be in the output
+        assert "https://a.com" in result
+        assert "https://b.com" in result
+
+    async def test_sections_mode_url_not_in_dict(self):
+        """URLs not in the sections dict get empty list (no sections)."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections={},  # URL not in dict
+        )
+        assert "No sections requested" in result
+
+    async def test_sections_mode_backward_compat_none(self):
+        """Passing sections=None should still work (no sections for any URL)."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=None,
         )
         assert "No sections requested" in result
 
@@ -423,6 +457,94 @@ class TestScoutUrls:
         result = await scout_urls(["https://example.com"], mode="full")
         assert "Scouted Pages" in result
         assert "pip install" in result
+
+
+class TestDeepResearch:
+    """Tests for the ``deep_research`` MCP tool."""
+
+    _MULTI_SECTION_MD = (
+        "# Project Overview\n\n"
+        "Welcome to the project.\n\n"
+        "## Installation\n\n"
+        "Run `pip install foo`.\n\n"
+    )
+
+    @pytest.fixture(autouse=True)
+    def _mock_dependencies(self):
+        """Mock both search_web and ScoutCrawler."""
+        with patch("server.server.core_search_web") as mock_search, \
+             patch("scout.crawler.ScoutCrawler") as mock_crawler_cls:
+
+            mock_search.return_value = [
+                MagicMock(
+                    title="Python Docs",
+                    url="https://docs.python.org/3/",
+                    snippet="Official Python documentation.",
+                ),
+                MagicMock(
+                    title="Real Python",
+                    url="https://realpython.com/",
+                    snippet="Python tutorials.",
+                ),
+            ]
+
+            mock_crawler = MagicMock()
+            async def fake_crawl_batch(urls, **_kw):
+                for u in urls:
+                    yield u, self._MULTI_SECTION_MD
+            mock_crawler.crawl_batch = fake_crawl_batch
+            mock_crawler_cls.return_value = mock_crawler
+            yield
+
+    async def test_searches_and_crawls(self):
+        """deep_research should search, crawl, and return combined results."""
+        result = await deep_research("python docs")
+        assert "Deep Research" in result
+        assert "Search Results" in result
+        assert "Python Docs" in result
+        assert "Crawled Content" in result
+        assert "Project Overview" in result
+
+    async def test_no_search_results(self):
+        """When search returns nothing, show a message."""
+        with patch("server.server.core_search_web", return_value=[]):
+            result = await deep_research("xyznothing")
+        assert "No web results found" in result
+
+    async def test_empty_urls_in_results(self):
+        """Results without URLs should be skipped gracefully."""
+        with patch("server.server.core_search_web") as mock_search:
+            mock_search.return_value = [
+                MagicMock(title="No URL", url="", snippet="No link."),
+            ]
+            result = await deep_research("test")
+        assert "No valid URLs" in result
+
+    async def test_search_import_error(self):
+        """When ddgs is missing, show helpful message."""
+        with patch("server.server.core_search_web",
+                   side_effect=ImportError("ddgs not installed")):
+            result = await deep_research("test")
+        assert "Error" in result
+        assert "ddgs" in result
+
+    async def test_scout_import_error(self):
+        """When crawl4ai is missing, show helpful message."""
+        with patch("scout.crawler.ScoutCrawler",
+                   side_effect=ImportError("No module named crawl4ai")):
+            result = await deep_research("test")
+        assert "Error" in result
+        assert "crawl4ai" in result
+
+    async def test_max_results_clamps_urls(self):
+        """max_results should limit how many search results are considered."""
+        with patch("server.server.core_search_web") as mock_search:
+            mock_search.return_value = [
+                MagicMock(title=f"Result {i}", url=f"https://example.com/{i}", snippet="")
+                for i in range(5)
+            ]
+            result = await deep_research("test", max_results=3, max_urls=2)
+        assert result.count("Source:") == 2
 
 
 class TestReadFile:
