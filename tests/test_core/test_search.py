@@ -13,13 +13,13 @@ from core.search import SearchResult, search_duckduckgo, search_web
 
 
 # ---------------------------------------------------------------------------
-# Mock duckduckgo_search module — DDGS is imported lazily inside
+# Mock ddgs module — DDGS is imported lazily inside
 # search_duckduckgo(), so we inject a fake module into sys.modules.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
 def mock_ddgs_module() -> MagicMock:
-    """Inject a mock ``duckduckgo_search`` module with a fake DDGS class."""
+    """Inject a mock ``ddgs`` module with a fake DDGS class."""
     mock_ddgs = MagicMock()
     mock_instance = MagicMock()
     mock_instance.__enter__.return_value = mock_instance
@@ -39,9 +39,9 @@ def mock_ddgs_module() -> MagicMock:
     mock_ddgs.return_value = mock_instance
     mock_module = MagicMock()
     mock_module.DDGS = mock_ddgs
-    sys.modules["duckduckgo_search"] = mock_module
+    sys.modules["ddgs"] = mock_module
     yield mock_instance
-    sys.modules.pop("duckduckgo_search", None)
+    sys.modules.pop("ddgs", None)
 
 
 @pytest.fixture
@@ -61,9 +61,9 @@ def mock_ddgs_single() -> MagicMock:
     mock_ddgs.return_value = mock_instance
     mock_module = MagicMock()
     mock_module.DDGS = mock_ddgs
-    sys.modules["duckduckgo_search"] = mock_module
+    sys.modules["ddgs"] = mock_module
     yield mock_instance
-    sys.modules.pop("duckduckgo_search", None)
+    sys.modules.pop("ddgs", None)
 
 
 class TestSearchDuckDuckGo:
@@ -107,13 +107,13 @@ class TestSearchDuckDuckGo:
         assert len(results) == 1
 
     def test_import_error(self):
-        """When duckduckgo-search is not installed, raise ImportError."""
+        """When ddgs is not installed, raise ImportError."""
         # Ensure the module is NOT cached in sys.modules
-        sys.modules.pop("duckduckgo_search", None)
+        sys.modules.pop("ddgs", None)
         # The package is installed in the test environment, so we need to
         # simulate the import failing by patching __import__.
         with patch("builtins.__import__", side_effect=ImportError("mocked")):
-            with pytest.raises(ImportError, match="duckduckgo-search"):
+            with pytest.raises(ImportError, match="ddgs"):
                 search_duckduckgo("test")
 
 

@@ -238,14 +238,14 @@ class TestSearchWeb:
         assert "No web results found" in result
 
     def test_import_error_handled(self):
-        """When duckduckgo-search is missing, show a helpful message."""
+        """When ddgs is missing, show a helpful message."""
         with patch(
             "server.server.core_search_web",
-            side_effect=ImportError("duckduckgo-search not installed"),
+            side_effect=ImportError("ddgs not installed"),
         ):
             result = search_web("test")
         assert "Error" in result
-        assert "duckduckgo-search" in result
+        assert "ddgs" in result
 
 
 class TestScoutUrls:
