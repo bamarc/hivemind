@@ -149,3 +149,4 @@ git log --oneline -10
 3. **Atomic commits** — group by concern (refactor, feature, build, test, docs), not by file location. Each commit should be a single logical change.
 4. **Test before push** — `uv run pytest` must pass. This is non-negotiable.
 5. **Working tree should be clean** after all commits. If there are remaining unstaged files, assess whether they belong to the current batch or are intentional leftovers.
+6. **Avoid backticks in commit message bodies** — when using `git commit -m`, the shell interprets backtick-enclosed text as command substitution. Use plain text or single quotes in commit message bodies. For multi-line messages, prefer `git commit` without `-m` to open an editor, or use `-m` with plain text only.
