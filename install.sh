@@ -5,8 +5,8 @@ set -e
 # Hivemind Installer
 # ──────────────────────────────────────────────────────────────────────
 # Usage:
-#   bash install.sh           # Simple install (core only, no scout)
-#   bash install.sh --extended  # Extended install (core + scout/web crawler)
+#   bash install.sh              # Standard install (core + web search)
+#   bash install.sh --extended   # Extended install (adds crawl4ai, playwright)
 # ──────────────────────────────────────────────────────────────────────
 
 EXTENDED=false
@@ -23,11 +23,11 @@ echo "📦 Installing hivemind tool..."
 
 if [ "$EXTENDED" = true ]; then
     echo "🌐 Extended install: including scout dependencies (crawl4ai, playwright)..."
-    uv tool install --reinstall --force . --with crawl4ai --with playwright
+    uv tool install --reinstall --force . --with duckduckgo-search --with crawl4ai --with playwright
 else
-    echo "🔧 Simple install: core only (scout/web crawler excluded)."
-    echo "   To include scout, run: bash install.sh --extended"
-    uv tool install --reinstall --force .
+    echo "🔧 Standard install: core + web search (duckduckgo-search)."
+    echo "   To include the full web crawler, run: bash install.sh --extended"
+    uv tool install --reinstall --force . --with duckduckgo-search
 fi
 
 # 2. Install Playwright browsers if scout dependencies are present.
@@ -40,7 +40,7 @@ if [ "$EXTENDED" = true ]; then
         echo "✅ Browsers already present in ~/.cache/ms-playwright"
     fi
 else
-    echo "⏭️  Skipping Playwright browser install (not needed for core install)."
+    echo "⏭️  Skipping Playwright browser install (not needed for standard install)."
 fi
 
 echo "✨ Hivemind is ready!"

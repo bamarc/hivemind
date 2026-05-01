@@ -922,6 +922,9 @@ scout = [
     { name = "duckduckgo-search" },
     { name = "playwright" },
 ]
+web = [
+    { name = "duckduckgo-search" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -933,6 +936,7 @@ dev = [
 requires-dist = [
     { name = "crawl4ai", marker = "extra == 'scout'", specifier = ">=0.8.6" },
     { name = "duckduckgo-search", marker = "extra == 'scout'", specifier = ">=8.0" },
+    { name = "duckduckgo-search", marker = "extra == 'web'", specifier = ">=8.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "openai", specifier = ">=2.32.0" },
@@ -955,7 +959,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]
-provides-extras = ["scout"]
+provides-extras = ["web", "scout"]
 
 [package.metadata.requires-dev]
 dev = [

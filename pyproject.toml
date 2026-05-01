@@ -28,6 +28,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "duckduckgo-search>=8.0",
+]
 scout = [
     "crawl4ai>=0.8.6",
     "duckduckgo-search>=8.0",

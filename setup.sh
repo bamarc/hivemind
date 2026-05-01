@@ -5,8 +5,8 @@ set -e
 # Hivemind Setup Wizard
 # ──────────────────────────────────────────────────────────────────────
 # Usage:
-#   bash setup.sh             # Simple install (core only, no scout)
-#   bash setup.sh --extended  # Extended install (core + scout/web crawler)
+#   bash setup.sh              # Standard install (core + web search)
+#   bash setup.sh --extended   # Extended install (adds crawl4ai, playwright)
 # ──────────────────────────────────────────────────────────────────────
 
 EXTENDED=false
@@ -25,9 +25,9 @@ if [ "$EXTENDED" = true ]; then
     echo "🌐 Extended install: including scout dependencies (crawl4ai, playwright)..."
     uv sync --quiet --extra scout
 else
-    echo "🔧 Simple install: core only (scout/web crawler excluded)."
-    echo "   To include scout, run: bash setup.sh --extended"
-    uv sync --quiet
+    echo "🔧 Standard install: core + web search (duckduckgo-search)."
+    echo "   To include the full web crawler, run: bash setup.sh --extended"
+    uv sync --quiet --extra web
 fi
 
 # 2. Run the interactive wizard
