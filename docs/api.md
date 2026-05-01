@@ -78,9 +78,20 @@ Manage the semantic search index. Call `get_index_status` first; if not indexed,
 
 **Crawl one or more URLs and return their content as markdown.** Use this after `search_web` to get full page content from search results. Multiple URLs are crawled in parallel and returned in a single response to minimize token usage.
 
+Supports a **Map-Reduce** pattern for large pages: first request a Table of Contents (`mode="toc"`), then request only the relevant sections (`mode="sections"`). This avoids context-window overflow from giant GitHub PRs, documentation pages, etc.
+
 - **Parameters:**
   - `urls` (required): List of URLs to crawl (e.g., `["https://docs.python.org/3/library/asyncio.html"]`).
   - `max_results` (optional, default 3): Maximum URLs to process (capped at 10).
+  - `mode` (optional, default `"full"`): One of:
+    - `"full"` — Returns raw markdown content (backward compatible). If content exceeds ~8000 chars, shows an excerpt with a hint to use `mode="toc"`.
+    - `"toc"` — Crawls the URL, splits content into sections via the MarkdownChunker, caches chunks in memory, and returns a Table of Contents showing section names, heading levels, line ranges, and estimated token counts. No raw content is returned.
+    - `"sections"` — Reads previously cached chunks and returns content only for the sections named in the `sections` parameter. Falls back to re-crawling if cache is empty.
+  - `sections` (optional, default `None`): List of section names or numeric indices to retrieve when `mode="sections"`. Matches are case-insensitive substring matches against header text (e.g., `["Conversation", "Checks"]` for a GitHub PR). Mutually exclusive with `mode="full"`.
+
+- **Usage flow for large pages:**
+  1. `scout_urls(["https://github.com/org/repo/pull/123"], mode="toc")` → get TOC
+  2. `scout_urls(["https://github.com/org/repo/pull/123"], mode="sections", sections=["Conversation", "Checks"])` → get only relevant sections (~4500 tokens instead of 22000+)
 
 - **Requires:** `crawl4ai` and `playwright`. Install with `uv sync --extra scout` then `playwright install chromium`.
 

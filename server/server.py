@@ -344,7 +344,12 @@ def search_web(query: str, max_results: int = 10) -> str:
 
 
 @mcp.tool()
-async def scout_urls(urls: list[str], max_results: int = 3) -> str:
+async def scout_urls(
+    urls: list[str],
+    max_results: int = 3,
+    mode: str = "full",
+    sections: list[str] | None = None,
+) -> str:
     """
     Crawl one or more URLs and return their content as markdown.
 
@@ -352,9 +357,19 @@ async def scout_urls(urls: list[str], max_results: int = 3) -> str:
     Multiple URLs are crawled in parallel and returned in a single response
     to reduce token overhead.
 
+    When used with ``mode="toc"``, returns a Table of Contents showing all
+    sections of the page with estimated token counts — the agent can then
+    request only the relevant sections with ``mode="sections"``.
+
     Args:
         urls: List of URLs to crawl (e.g., ["https://docs.python.org/3/library/asyncio.html"]).
         max_results: Maximum number of URLs to crawl (default 3, max 10, safety limit).
+        mode: One of ``"full"`` (default, raw markdown with truncation),
+            ``"toc"`` (Table of Contents only), or ``"sections"`` (chunks
+            matching the ``sections`` parameter).
+        sections: Section names or indices to retrieve when ``mode="sections"``.
+            Matches against header text (case-insensitive substring) and
+            numeric index from the TOC.
     """
     try:
         from scout.crawler import ScoutCrawler
@@ -373,6 +388,47 @@ async def scout_urls(urls: list[str], max_results: int = 3) -> str:
     max_results = max(1, min(max_results, 10))
     urls = urls[:max_results]
 
+    # ------------------------------------------------------------------
+    # Sections mode — read from cache first, fall back to re-crawling
+    # ------------------------------------------------------------------
+    if mode == "sections":
+        from scout.chunk_cache import get_chunk_cache
+
+        cache = get_chunk_cache()
+        section_results: list[str] = []
+
+        for url in urls:
+            cached = cache.get_sections(url, sections or [])
+            if cached is not None:
+                section_results.append(cached)
+            else:
+                # Cache miss — crawl, chunk, cache, then serve
+                logger.info("Cache miss for %s — re-crawling for sections mode", url)
+                try:
+                    crawler = ScoutCrawler()
+                    content = None
+                    async for u, c in crawler.crawl_batch([url]):
+                        content = c
+                    if content:
+                        from indexer.chunkers.markdown import MarkdownChunker
+                        chunker = MarkdownChunker()
+                        chunks = chunker.chunk(content, url)
+                        cache.store(url, chunks)
+                        cached = cache.get_sections(url, sections or [])
+                        if cached:
+                            section_results.append(cached)
+                except Exception as e:
+                    logger.error("Error re-crawling %s: %s", url, e)
+                    section_results.append(f"Error reading {url}: {e}")
+
+        if not section_results:
+            return "No content retrieved from any of the provided URLs."
+
+        return "\n".join(section_results)
+
+    # ------------------------------------------------------------------
+    # Full / TOC mode — crawl, chunk, cache, then format
+    # ------------------------------------------------------------------
     try:
         crawler = ScoutCrawler()
         results: list[tuple[str, str]] = []
@@ -383,13 +439,50 @@ async def scout_urls(urls: list[str], max_results: int = 3) -> str:
         if not results:
             return "No content retrieved from any of the provided URLs."
 
+        # Chunk + cache all results (used by both "full" and "toc" modes)
+        from indexer.chunkers.markdown import MarkdownChunker
+        from scout.chunk_cache import get_chunk_cache
+
+        chunker = MarkdownChunker()
+        cache = get_chunk_cache()
+
+        for url, content in results:
+            chunks = chunker.chunk(content, url)
+            cache.store(url, chunks)
+
+        # TOC mode — return Table of Contents only
+        if mode == "toc":
+            toc_lines = ["# Scouted Pages (Table of Contents)\n"]
+            for url, _ in results:
+                toc = cache.get_toc(url)
+                toc_lines.append(toc or f"Could not generate TOC for {url}")
+                toc_lines.append("")
+            return "\n".join(toc_lines)
+
+        # Full mode — return raw markdown (backward compatible)
         lines = ["# Scouted Pages\n"]
         for url, content in results:
             lines.append(f"---")
             lines.append(f"## Source: {url}\n")
-            # Truncate excessively long pages to avoid overwhelming the context
+            # Use chunk-aware truncation instead of blind 8k truncation:
+            # if content is large, show first two chunks + note about sections mode
             if len(content) > 8000:
-                content = content[:8000] + "\n\n... [TRUNCATED - page too large] ..."
+                chunks = cache.get(url)
+                if chunks and len(chunks) > 2:
+                    excerpt_lines = []
+                    excerpt_lines.append(chunks[0].content)
+                    excerpt_lines.append("")
+                    excerpt_lines.append(
+                        "... [TRUNCATED - page too large. "
+                        f"This page has {len(chunks)} sections. "
+                        "Re-call with mode='toc' to browse sections, "
+                        "then use mode='sections' to read specific sections.] ..."
+                    )
+                    excerpt_lines.append("")
+                    excerpt_lines.append(chunks[1].content)
+                    content = "\n".join(excerpt_lines)
+                else:
+                    content = content[:8000] + "\n\n... [TRUNCATED - page too large] ..."
             lines.append(content)
             lines.append("")
 
