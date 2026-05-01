@@ -9,219 +9,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 from qdrant_client import models
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.live import Live
 from rich.console import Console
-from core.clients import db, get_embedding, get_embeddings_batch
+from core.clients import get_db, get_embeddings_batch
 from core.config import settings
+from core.filesystem import EXCLUDED_DIRS
 from .state import StateManager
-from .chunkers.by_size import BySizeChunker
-from .chunkers.by_lines import ByLinesChunker
-from .chunkers.ast import ASTChunker
-from .chunkers.markdown import MarkdownChunker
 from .git_utils import GitManager
 from .preprocessors.manager import PreprocessorManager
+from .index_worker import IndexWorker
+from .code_handler import CodeHandler, EXTENSION_TO_LANG
 
 logger = logging.getLogger(__name__)
 
-EXTENSION_TO_LANG = {
-    '.py': 'python',
-    '.go': 'go',
-    '.js': 'javascript',
-    '.ts': 'typescript',
-    '.tsx': 'typescript',
-    '.md': 'markdown',
-    '.yaml': 'yaml',
-    '.yml': 'yaml',
-    '.toml': 'toml',
-    '.c': 'c',
-    '.h': 'c',
-    '.sh': 'shell',
-    '.tf': 'hcl',
-    '.css': 'css',
-    '.scss': 'scss',
-    '.sh': 'shell',
-    '.conf': 'config',
-    'Dockerfile': 'dockerfile'
-}
-
-class IndexWorker(threading.Thread):
-    def __init__(self, task_queue: queue.Queue, state_manager: StateManager, git_manager: Optional[GitManager] = None):
-        super().__init__(daemon=True)
-        self.task_queue = task_queue
-        self.state_manager = state_manager
-        self.git_manager = git_manager
-        self.preprocessor_manager = PreprocessorManager()
-        
-        # Select chunker based on config
-        if settings.chunking.strategy == "by_lines":
-            self.chunker = ByLinesChunker(
-                chunk_lines=settings.chunking.by_lines.chunk_lines,
-                overlap_lines=settings.chunking.by_lines.overlap_lines
-            )
-        elif settings.chunking.strategy == "ast":
-            self.chunker = ASTChunker(
-                chunk_lines=settings.chunking.ast.chunk_lines,
-                overlap_lines=settings.chunking.ast.overlap_lines
-            )
-        else:
-            self.chunker = BySizeChunker(
-                chunk_size=settings.chunking.by_size.chunk_size,
-                overlap=settings.chunking.by_size.overlap
-            )
-        
-        # Dedicated Markdown chunker
-        self.markdown_chunker = MarkdownChunker()
-        self.progress_callback = None
-
-    def run(self):
-        while True:
-            filepath = self.task_queue.get()
-            if filepath is None:
-                break
-            try:
-                self.index_file(filepath)
-            except Exception as e:
-                logger.error(f"Error indexing {filepath}: {e}")
-            finally:
-                if self.progress_callback:
-                    self.progress_callback()
-                self.task_queue.task_done()
-
-    def index_file(self, filepath: Path):
-        if not self.state_manager.should_reindex(filepath):
-            logger.debug(f"Skipping unchanged file: {filepath}")
-            return
-
-        start_total = time.perf_counter()
-        logger.info(f"Indexing: {filepath}")
-        
-        # 1. Read and Chunk
-        t0 = time.perf_counter()
-        
-        content = self.preprocessor_manager.preprocess(filepath)
-        if content is None:
-            logger.error(f"Failed to preprocess or read file: {filepath}")
-            return
-        
-        # Use specialized markdown chunker for .md files or pre-processed content that looks like markdown
-        if filepath.suffix == ".md" or content.startswith("---") or content.startswith("# "):
-            chunks = self.markdown_chunker.chunk(content, str(filepath))
-        else:
-            chunks = self.chunker.chunk(content, str(filepath))
-            
-        chunk_time = time.perf_counter() - t0
-        
-        # Get git metadata if enabled
-        git_metadata = {}
-        if settings.git_enabled and self.git_manager:
-            git_metadata = self.git_manager.get_commit_metadata(filepath)
-
-        # Determine file-level metadata
-        extension = filepath.suffix
-        language = EXTENSION_TO_LANG.get(extension if extension else filepath.name, "unknown")
-        is_test = any(pattern in filepath.name.lower() for pattern in ("test", "spec", "_test"))
-
-        # 2. Embed
-        t1 = time.perf_counter()
-        points = []
-        if chunks:
-            # Batch fetch embeddings
-            texts = [chunk.content for chunk in chunks]
-            vectors = get_embeddings_batch(texts)
-            
-            for i, chunk in enumerate(chunks):
-                vector = vectors[i]
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{chunk.filepath}_chunk_{chunk.chunk_index}"))
-                
-                # Process path segments for hierarchical filtering
-                rel_path = chunk.filepath
-                try:
-                    # Attempt to get path relative to current working directory
-                    rel_path = str(Path(chunk.filepath).relative_to(Path.cwd()))
-                except ValueError:
-                    pass
-                
-                path_segments = {
-                    str(i): segment 
-                    for i, segment in enumerate(Path(rel_path).parts[:5])
-                }
-                
-                payload = {
-                    "filepath": chunk.filepath,
-                    "content": chunk.content,
-                    "chunk_index": chunk.chunk_index,
-                    "language": language,
-                    "line_start": chunk.line_start,
-                    "line_end": chunk.line_end,
-                    "is_test": is_test,
-                    "symbols": chunk.metadata.get("symbols", []) if chunk.metadata else [],
-                    "type": "code",
-                    "path_segments": path_segments,
-                    **git_metadata
-                }
-                
-                points.append({
-                    "id": point_id,
-                    "vector": vector,
-                    "payload": payload
-                })
-        embed_time = time.perf_counter() - t1
-
-        # 3. Upsert
-        t2 = time.perf_counter()
-        if points:
-            db.upsert(
-                collection_name=settings.qdrant.collection_name,
-                points=points
-            )
-        upsert_time = time.perf_counter() - t2
-        
-        total_time = time.perf_counter() - start_total
-        self.state_manager.update_file_state(filepath, len(chunks))
-        
-        logger.info(
-            f"Indexed {filepath}: {len(chunks)} chunks in {total_time:.2f}s "
-            f"(chunk: {chunk_time:.2f}s, embed: {embed_time:.2f}s, upsert: {upsert_time:.2f}s)"
-        )
-
-class CodeHandler(FileSystemEventHandler):
-    def __init__(self, task_queue: queue.Queue, git_manager: Optional[GitManager] = None):
-        self.task_queue = task_queue
-        self.git_manager = git_manager
-        self.preprocessor_manager = PreprocessorManager()
-        self.extensions = self.preprocessor_manager.supported_extensions
-        self.filenames = ('Dockerfile',)
-
-    def _should_handle(self, filepath: Path) -> bool:
-        if not (filepath.suffix in self.extensions or filepath.name in self.filenames):
-            return False
-        
-        if settings.git_enabled and self.git_manager:
-            if self.git_manager.is_ignored(filepath):
-                return False
-            if settings.git_only_tracked and not self.git_manager.is_tracked(filepath):
-                return False
-        
-        # Hardcoded safety checks
-        if ".venv" in filepath.parts or ".git" in filepath.parts:
-            return False
-            
-        return True
-
-    def on_modified(self, event):
-        if not event.is_directory and self._should_handle(Path(event.src_path)):
-            self.task_queue.put(Path(event.src_path))
-
-    def on_created(self, event):
-        if not event.is_directory and self._should_handle(Path(event.src_path)):
-            self.task_queue.put(Path(event.src_path))
 
 class Indexer:
     def __init__(self, console: Optional[Console] = None):
-        self.task_queue = queue.Queue()
+        # Bounded queue provides natural backpressure: when the queue is
+        # full, the file scanner blocks, preventing unbounded memory growth
+        # during large initial scans.
+        maxsize = settings.indexer_workers * 100
+        self.task_queue = queue.Queue(maxsize=maxsize)
         self.state_manager = StateManager(settings.state.directory)
         self.git_manager = GitManager(Path.cwd()) if settings.git_enabled else None
         self.console = console or Console()
@@ -299,8 +109,8 @@ class Indexer:
                     return
                 if char == '\x03': # Ctrl-C
                     return
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Input monitor error (non-fatal): %s", exc)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
@@ -330,7 +140,7 @@ class Indexer:
                 # Prune ignored/blacklisted directories from recursion
                 for d in list(dirs):
                     dir_path = root_path / d
-                    if d in (".git", ".venv", "__pycache__"):
+                    if d in EXCLUDED_DIRS:
                         dirs.remove(d)
                         continue
                     if settings.git_enabled and self.git_manager:
@@ -405,7 +215,7 @@ class Indexer:
         }
         
         try:
-            db.upsert(
+            get_db().upsert(
                 collection_name=settings.qdrant.collection_name,
                 points=[
                     models.PointStruct(

@@ -54,22 +54,28 @@ class StateManager:
         return sha256_hash.hexdigest()
 
     def should_reindex(self, filepath: Path) -> bool:
+        """Determine whether *filepath* needs to be re-indexed.
+
+        The lock is held for the **entire** decision to avoid a TOCTOU
+        race between checking the stored state and computing the current
+        checksum.
+        """
         filepath_str = str(filepath.absolute())
-        
+
         with self.lock:
             if filepath_str not in self.state["indexed_files"]:
                 return True
             stored_state = self.state["indexed_files"][filepath_str]
 
-        current_mtime = datetime.fromtimestamp(filepath.stat().st_mtime).isoformat()
-        
-        if stored_state["last_modified"] != current_mtime:
-            # Checksum as a fallback/verification
-            current_hash = self.get_file_hash(filepath)
-            if stored_state["checksum"] != current_hash:
-                return True
-        
-        return False
+            current_mtime = datetime.fromtimestamp(filepath.stat().st_mtime).isoformat()
+
+            if stored_state["last_modified"] != current_mtime:
+                # Checksum as a fallback/verification
+                current_hash = self.get_file_hash(filepath)
+                if stored_state["checksum"] != current_hash:
+                    return True
+
+            return False
 
     def update_file_state(self, filepath: Path, chunk_count: int):
         filepath_str = str(filepath.absolute())

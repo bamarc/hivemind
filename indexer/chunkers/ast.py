@@ -1,31 +1,18 @@
 from typing import List, Dict, Any, Optional
 from .base import ChunkingStrategy, Chunk
-from tree_sitter import Language, Parser
-import tree_sitter_python as tspython
-import tree_sitter_go as tsgo
-import tree_sitter_typescript as tstypescript
-import tree_sitter_yaml as tsyaml
-import tree_sitter_hcl as tshcl
+from tree_sitter import Parser
+from core.language_support import EXTENSION_TO_LANGUAGE, EXTENSION_TO_LANG_NAME, DEFINITION_TYPES
 import os
 import re
+
 
 class ASTChunker(ChunkingStrategy):
     def __init__(self, chunk_lines: int = 50, overlap_lines: int = 5):
         self.chunk_lines = chunk_lines
         self.overlap_lines = overlap_lines
-        
-        # Initialize parsers
-        self.languages = {
-            ".py": Language(tspython.language()),
-            ".go": Language(tsgo.language()),
-            ".ts": Language(tstypescript.language_typescript()),
-            ".tsx": Language(tstypescript.language_tsx()),
-            ".yaml": Language(tsyaml.language()),
-            ".yml": Language(tsyaml.language()),
-            ".tf": Language(tshcl.language())
-        }
+
         self.parser = Parser()
-        
+
         # Sanitization patterns
         self.base64_pattern = re.compile(r'([A-Za-z0-9+/]{100,}=*)')
         self.long_string_pattern = re.compile(r'("[^"]{500,}"|\'[^\']{500,}\')')
@@ -54,7 +41,7 @@ class ASTChunker(ChunkingStrategy):
                 line_end=start_line + len(lines) - 1,
                 metadata=metadata
             )]
-        
+
         # Sub-chunking logic
         chunks = []
         current_start = 0
@@ -78,60 +65,35 @@ class ASTChunker(ChunkingStrategy):
 
     def chunk(self, content: str, filepath: str) -> List[Chunk]:
         ext = os.path.splitext(filepath)[1]
-        lang = self.languages.get(ext)
-        
+        lang = EXTENSION_TO_LANGUAGE.get(ext)
+
         if not lang:
             # Fallback to line-based chunking if no AST support
             return self._create_chunks_from_text(content, filepath, 1, 0, {})
 
         self.parser.language = lang
-        tree = self.parser.parse(bytes(content, "utf8"))
+        tree = self.parser.parse(bytes(content, "utf8", errors="replace"))
         root = tree.root_node
-        
+
         chunks = []
         current_idx = 0
-        
-        # Definition types per language
-        def_types = {
-            "python": ("function_definition", "class_definition"),
-            "go": ("function_declaration", "method_declaration", "type_declaration"),
-            "typescript": (
-                "function_declaration", "method_definition", "class_declaration", 
-                "interface_declaration", "type_alias_declaration", "enum_declaration",
-                "arrow_function", "variable_declaration"
-            ),
-            "yaml": ("block_mapping_pair",),
-            "hcl": ("block",)
-        }
-        
-        if ext == ".py":
-            lang_name = "python"
-        elif ext == ".go":
-            lang_name = "go"
-        elif ext in (".ts", ".tsx"):
-            lang_name = "typescript"
-        elif ext in (".yaml", ".yml"):
-            lang_name = "yaml"
-        elif ext == ".tf":
-            lang_name = "hcl"
-        else:
-            lang_name = "unknown"
-            
-        target_types = def_types.get(lang_name, ())
+
+        lang_name = EXTENSION_TO_LANG_NAME.get(ext, "unknown")
+        target_types = DEFINITION_TYPES.get(lang_name, ())
 
         # Keep track of content that isn't inside a definition
         buffer_nodes = []
-        
+
         def flush_buffer(nodes, start_idx):
             if not nodes:
                 return [], start_idx
-            
+
             start_line = nodes[0].start_point[0] + 1
             end_line = nodes[-1].end_point[0] + 1
             # Extract text for these nodes
             lines = content.splitlines()
             buffer_text = "\n".join(lines[start_line-1:end_line])
-            
+
             new_chunks = self._create_chunks_from_text(
                 buffer_text, filepath, start_line, start_idx, {"type": "general"}
             )
@@ -145,20 +107,20 @@ class ASTChunker(ChunkingStrategy):
                     chunks.extend(buf_chunks)
                     current_idx = next_idx
                     buffer_nodes = []
-                
+
                 # Process definition node
                 name = self._get_node_name(child)
                 start_line = child.start_point[0] + 1
                 node_text = child.text.decode("utf8")
-                
+
                 metadata = {
                     "type": child.type,
                     "symbols": [name] if name else []
                 }
-                
+
                 # Sanitize before chunking
                 sanitized_text = self.sanitize_content(node_text)
-                
+
                 node_chunks = self._create_chunks_from_text(
                     sanitized_text, filepath, start_line, current_idx, metadata
                 )
@@ -166,10 +128,10 @@ class ASTChunker(ChunkingStrategy):
                 current_idx += len(node_chunks)
             else:
                 buffer_nodes.append(child)
-        
+
         # Final flush
         if buffer_nodes:
             buf_chunks, _ = flush_buffer(buffer_nodes, current_idx)
             chunks.extend(buf_chunks)
-            
+
         return chunks

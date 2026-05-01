@@ -2,35 +2,31 @@ import sys
 import time
 from watchdog.observers import Observer
 from indexer.watcher import CodeHandler
-from core.clients import db, COLLECTION_NAME, EMBED_DIM
-from qdrant_client.http.models import Distance, VectorParams
+from core.clients import get_db, init_collection
+from core.config import settings
+from qdrant_client import models
 
 def init_db():
-    """Ensure the collection exists in Qdrant before starting."""
-    if not db.collection_exists(collection_name=COLLECTION_NAME):
-        print(f"[CLI] Initializing collection: {COLLECTION_NAME}")
-        db.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
-        )
+    """Ensure the collection exists in Qdrant before starting, with
+    dimension validation (delegates to the canonical ``init_collection``)."""
+    init_collection()
 
 if __name__ == "__main__":
+    # This is a simple CLI wrapper for backward compatibility.
+    # The main entry point is `hivemind indexer start <path>` via main.py.
+    import sys
+    from pathlib import Path
+    from indexer.watcher import Indexer
+    from core.clients import init_collection
+    
     if len(sys.argv) < 2:
         print("Usage: uv run python -m cli.run_indexer <path_to_watch>")
         sys.exit(1)
-        
-    init_db()
     
-    target_path = sys.argv[1]
-    event_handler = CodeHandler()
-    observer = Observer()
-    observer.schedule(event_handler, target_path, recursive=True)
-    
-    print(f"[CLI] Deploying Indexer to monitor: {target_path}")
-    observer.start()
+    init_collection()
+    target_path = Path(sys.argv[1])
+    indexer = Indexer()
     try:
-        while True:
-            time.sleep(1)
+        indexer.start(target_path, watch=True)
     except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+        indexer.stop()

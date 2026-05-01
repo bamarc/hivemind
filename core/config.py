@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Tuple
 from pydantic import Field, SecretStr
 from pydantic_settings import (
     BaseSettings, 
@@ -16,6 +16,12 @@ class ScoutSettings(BaseSettings):
     max_pages_per_domain: int = 50
     exclude_patterns: List[str] = ["*login*", "*signup*", "*cart*", "*pricing*"]
     content_filter: bool = True
+    skip_existing: bool = True
+    include_patterns: List[str] = []
+    concurrency_limit: int = 5
+    headless: bool = True
+    use_stealth: bool = True
+    base_delay: Tuple[float, float] = (1.0, 3.0)
 
 class QdrantSettings(BaseSettings):
     url: str = "http://localhost:6333"
@@ -63,7 +69,11 @@ class LoggingSettings(BaseSettings):
     file_path: Optional[Path] = None
 
 class StateSettings(BaseSettings):
-    directory: Path = Path(os.path.expanduser(f"~/.hivemind/{os.path.basename(os.getcwd())}/state"))
+    directory: Path = Field(
+        default_factory=lambda: Path(
+            os.path.expanduser(f"~/.hivemind/{os.path.basename(os.getcwd())}/state")
+        )
+    )
 
 class SecuritySettings(BaseSettings):
     secret_file: Path = Path("~/.hivemind/secrets.yaml").expanduser()
