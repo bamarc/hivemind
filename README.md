@@ -78,8 +78,14 @@ By using Hivemind, you acknowledge and accept this risk. The authors and contrib
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Configuration Reference](docs/configuration.md)
-- [CLI Command Reference](docs/cli.md)
-- [REST API Reference](docs/api.md)
-- [Agent Protocol (AGENTS.md)](AGENTS.md)
+Start at the [Documentation Index](docs/index.adoc) for a complete overview with TOC, or jump directly to a specific guide:
+
+- [Architecture](docs/architecture.adoc) — System design, component boundaries, data flow
+- [API Reference](docs/api.adoc) — MCP tools, REST endpoints, Qdrant schema
+- [CLI Command Reference](docs/cli.adoc) — All commands and options
+- [Configuration Reference](docs/configuration.adoc) — Full settings schema
+- [Indexer Deep Dive](docs/indexer.adoc) — Pipeline, chunking, state management
+- [Scout Deep Dive](docs/scout.adoc) — Web crawling, Map-Reduce pattern
+- [Deployment Guide](docs/deployment.adoc) — systemd, PM2, Docker
+- [Troubleshooting](docs/troubleshooting.adoc) — Common issues and solutions
+- [Agent Protocol (AGENTS.md)](AGENTS.md) — Rules for AI agents

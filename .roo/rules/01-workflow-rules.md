@@ -24,6 +24,7 @@ The project is managed exclusively via **uv**. Do not use `python` or `pip` dire
 ## Documentation Must Stay In Sync
 
 - Whenever you modify code, update the relevant documentation in `/docs/` to reflect the changes.
+- All documentation is written in **AsciiDoc** (`.adoc`) format.
 - Keep `README.md` up to date if the change affects onboarding, configuration, or usage.
 - Outdated documentation is considered a bug.
 
