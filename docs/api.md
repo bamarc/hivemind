@@ -10,10 +10,13 @@ Hivemind exposes custom MCP (Model Context Protocol) tools for AI agents. These 
 |----------|------|-------------|
 | 🥇 | `semantic_code_search` | **Always first.** Find code by meaning, not filename. Use natural language queries. |
 | 🥈 | `get_file_tree` | Only for structural overview. Do NOT use to find specific logic. |
+| 🥈 | `search_web` | Search the internet for documentation, API references, or solutions. |
+| 🥈 | `scout_urls` | Crawl URLs (from `search_web` results) to get full page markdown content. |
+| � | `read_file` | Read file contents with line numbers and slicing. Use when `semantic_code_search` is insufficient. |
+| 🥉 | `get_git_history` | Get last commit metadata (author, date, message) for any file. |
 | 🥉 | `analyze_code_complexity` | After finding a file, to determine if a small or flagship model should handle it. |
 | 🥉 | `generate_blueprint` | For architectural planning before implementing complex features. |
 | 🥉 | `run_verification` | To run tests and linting before completing a task. |
-| ❌ | `read_file` / `list_files` | **Last resort.** Manual file reading is slower and less accurate than semantic search. |
 
 ### `semantic_code_search`
 
@@ -60,6 +63,46 @@ Runs linters and tests for the project or a specific file.
 ### `get_index_status` / `start_indexing`
 
 Manage the semantic search index. Call `get_index_status` first; if not indexed, call `start_indexing`.
+
+### `search_web`
+
+**Search the internet using DuckDuckGo.** Returns title, URL, and snippet for each result. Use this to find documentation, API references, or solutions for programming questions. Then use `scout_urls` to fetch full page content from the most promising results.
+
+- **Parameters:**
+  - `query` (required): The search query string (e.g., `"python asyncio gather documentation"`).
+  - `max_results` (optional, default 10): Maximum results (capped at 20).
+
+- **Requires:** `duckduckgo-search` package. Install with `uv sync --extra scout`.
+
+### `scout_urls`
+
+**Crawl one or more URLs and return their content as markdown.** Use this after `search_web` to get full page content from search results. Multiple URLs are crawled in parallel and returned in a single response to minimize token usage.
+
+- **Parameters:**
+  - `urls` (required): List of URLs to crawl (e.g., `["https://docs.python.org/3/library/asyncio.html"]`).
+  - `max_results` (optional, default 3): Maximum URLs to process (capped at 10).
+
+- **Requires:** `crawl4ai` and `playwright`. Install with `uv sync --extra scout` then `playwright install chromium`.
+
+### `read_file`
+
+**Read file contents with line numbers and slicing.** Use when `semantic_code_search` doesn't give you enough context about a specific file.
+
+- **Parameters:**
+  - `filepath` (required): Path to the file (relative to workspace or absolute).
+  - `start_line` (optional, default 1): First line to read (1-based).
+  - `max_lines` (optional, default 500): Maximum lines to return (capped at 1000).
+
+- **Safety:** Refuses to read from excluded directories (`.git`, `node_modules`, `__pycache__`, etc.).
+
+### `get_git_history`
+
+**Get git commit metadata for a file.** Returns the last commit's hash, author, email, date, and subject. Use to understand who last modified a file and why.
+
+- **Parameters:**
+  - `filepath` (required): Path to the file (relative to workspace root or absolute).
+
+- **Graceful:** Returns a clear message for non-git repos or untracked files.
 
 ---
 
