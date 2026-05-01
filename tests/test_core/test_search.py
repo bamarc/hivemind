@@ -108,10 +108,13 @@ class TestSearchDuckDuckGo:
 
     def test_import_error(self):
         """When duckduckgo-search is not installed, raise ImportError."""
-        # Ensure the module is NOT in sys.modules
+        # Ensure the module is NOT cached in sys.modules
         sys.modules.pop("duckduckgo_search", None)
-        with pytest.raises(ImportError, match="duckduckgo-search"):
-            search_duckduckgo("test")
+        # The package is installed in the test environment, so we need to
+        # simulate the import failing by patching __import__.
+        with patch("builtins.__import__", side_effect=ImportError("mocked")):
+            with pytest.raises(ImportError, match="duckduckgo-search"):
+                search_duckduckgo("test")
 
 
 class TestSearchWeb:
