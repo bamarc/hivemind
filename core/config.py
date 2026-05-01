@@ -22,6 +22,10 @@ class ScoutSettings(BaseSettings):
     headless: bool = True
     use_stealth: bool = True
     base_delay: Tuple[float, float] = (1.0, 3.0)
+    # Search backend configuration
+    search_backend: Literal["duckduckgo", "brave", "searxng"] = "duckduckgo"
+    brave_api_key: Optional[SecretStr] = None
+    searxng_url: str = "http://localhost:8888"
 
 class QdrantSettings(BaseSettings):
     url: str = "http://localhost:6333"
