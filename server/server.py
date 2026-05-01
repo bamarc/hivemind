@@ -335,7 +335,7 @@ def search_web(query: str, max_results: int = 10) -> str:
     except ImportError as e:
         return (
             f"Error: {e}\n\n"
-            "The search_web tool requires the 'duckduckgo-search' package.\n"
+            "The search_web tool requires the 'ddgs' package.\n"
             "Install it with: `uv sync --extra scout`"
         )
     except Exception as e:

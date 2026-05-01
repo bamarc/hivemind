@@ -32,7 +32,7 @@ class SearchResult:
 
 
 def search_duckduckgo(query: str, max_results: int = 10) -> List[SearchResult]:
-    """Search the web using DuckDuckGo (via ``duckduckgo_search``).
+    """Search the web using DuckDuckGo (via ``ddgs``).
 
     Parameters
     ----------
@@ -49,14 +49,14 @@ def search_duckduckgo(query: str, max_results: int = 10) -> List[SearchResult]:
     Raises
     ------
     ImportError
-        If ``duckduckgo-search`` is not installed (install with
-        ``uv sync --extra scout`` or ``pip install duckduckgo-search``).
+        If ``ddgs`` is not installed (install with
+        ``uv sync --extra scout`` or ``pip install ddgs``).
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError:
         raise ImportError(
-            "duckduckgo-search is not installed. "
+            "ddgs is not installed. "
             "Install it with: uv sync --extra scout"
         )
 
