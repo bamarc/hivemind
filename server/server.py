@@ -2,10 +2,11 @@ import os
 import sys
 import logging
 from mcp.server.fastmcp import FastMCP
-from core.clients import db, get_embedding, chat_client
+from core.clients import get_db, get_embedding, get_chat_client
 from core.config import settings
 from core.complexity import get_complexity
-from core.planner import generate_blueprint as core_generate_blueprint
+from core.filesystem import get_file_tree as core_get_file_tree
+from core.planner import generate_blueprint as core_generate_blueprint, BlueprintError
 
 # Configure logging to stderr for MCP
 logging.basicConfig(
@@ -21,7 +22,7 @@ from qdrant_client import models
 
 @mcp.tool()
 def semantic_code_search(
-    query: str, 
+    query: str,
     limit: int = 5,
     root_path: str = None,
     file_filter: str = None,
@@ -29,15 +30,21 @@ def semantic_code_search(
     is_test: bool = None
 ) -> str:
     """
-    Search the codebase for relevant code snippets using natural language.
+    PRIMARY tool for code discovery. Find code by meaning, not by filename.
+    
+    Use this when you know what the code DOES but not where it lives.
+    This is ALWAYS preferred over manually reading files to locate logic.
+    It searches the vector index using natural language understanding,
+    so you can ask questions like "where is password hashing handled?"
+    or "find the database connection pooling logic."
     
     Args:
-        query: The natural language search query.
-        limit: Number of results to return (default 5).
-        root_path: Optional path to the project root to determine the collection.
-        file_filter: Optional substring to filter file paths (e.g., "server/").
-        language: Optional language filter (e.g., "python", "typescript").
-        is_test: Optional boolean to filter for test files only or exclude them.
+        query: Natural language description of the functionality, concept, or logic you are looking for. Phrase it as a question or a description (e.g., "user authentication flow", "how are embeddings generated?").
+        limit: Maximum number of results to return (default 5, max 20).
+        root_path: Project root path. Only needed if searching a different project than the current workspace. Auto-detected from workspace by default.
+        file_filter: Filter results to files whose path contains this substring (e.g., "server/" for server code, "test_" for test files).
+        language: Programming language to filter by (e.g., "python", "typescript", "rust"). Leave empty for all languages.
+        is_test: Set True to return only test files, False to exclude test files, None (default) for no filter.
     """
     try:
         from pathlib import Path
@@ -67,7 +74,7 @@ def semantic_code_search(
 
         search_filter = models.Filter(must=must_filters) if must_filters else None
 
-        response = db.query_points(
+        response = get_db().query_points(
             collection_name=collection_name,
             query=query_vector,
             limit=limit,
@@ -99,59 +106,36 @@ def semantic_code_search(
 @mcp.tool()
 def get_file_tree(root_path: str = None, depth: int = 2) -> str:
     """
-    Get a tree-like overview of the project structure.
-    Helpful for understanding the codebase layout before searching.
+    Get a structural overview of the project directory tree.
+    
+    Use this ONLY for understanding project layout (directory names, file organization).
+    For finding specific logic, features, or implementations, ALWAYS use semantic_code_search instead.
+    Reading individual files to search for logic is inefficient — semantic_code_search is faster and more accurate.
     
     Args:
-        root_path: Optional path to the project root. Defaults to current workspace.
-        depth: How many levels deep to show (default 2).
+        root_path: Project root path. Auto-detected from workspace by default.
+        depth: Directory tree depth (default 2). Increase to see deeper nesting.
     """
-    import os
     from pathlib import Path
-    
+
     root = Path(root_path) if root_path else settings.workspace_path
     root = root.absolute()
-    
+
     if not root.exists():
         return f"Error: Path {root} does not exist."
-        
-    tree_lines = [f"# File Tree for {root.name}"]
-    
-    def walk_tree(current_path: Path, current_depth: int, prefix: str = ""):
-        if current_depth > depth:
-            return
-            
-        try:
-            items = sorted(list(current_path.iterdir()), key=lambda x: (not x.is_dir(), x.name))
-        except PermissionError:
-            return
-        except Exception as e:
-            logger.error(f"Error walking tree at {current_path}: {e}")
-            return
 
-        for i, item in enumerate(items):
-            if item.name.startswith(('.', '__')) or item.name in ('node_modules', 'venv', '.venv', 'build', 'dist', '__pycache__'):
-                continue
-                
-            is_last = (i == len(items) - 1)
-            connector = "└── " if is_last else "├── "
-            
-            tree_lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
-            
-            if item.is_dir():
-                new_prefix = prefix + ("    " if is_last else "│   ")
-                walk_tree(item, current_depth + 1, new_prefix)
-
-    walk_tree(root, 1)
-    return "\n".join(tree_lines)
+    return core_get_file_tree(str(root), depth)
 
 @mcp.tool()
 def get_index_status(root_path: str = None) -> str:
     """
-    Check the current indexing status of the project.
+    Check if the semantic search index is ready for a project.
+    
+    Call this if semantic_code_search returns a "not indexed" message.
+    The index is built asynchronously — if it's not ready, use start_indexing.
     
     Args:
-        root_path: Optional path to the project root. Defaults to current workspace.
+        root_path: Project root path. Auto-detected from workspace by default.
     """
     import uuid
     from pathlib import Path
@@ -160,14 +144,14 @@ def get_index_status(root_path: str = None) -> str:
     root = Path(root_path) if root_path else settings.workspace_path
     root = root.absolute()
     
-    # Collection name logic: defaults to current settings, 
+    # Collection name logic: defaults to current settings,
     # but we could try to detect it if root_path is different.
     # For now, we assume the collection name matches the project folder name.
     collection_name = root.name if root_path else settings.qdrant.collection_name
     
     meta_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{root}_indexing_metadata"))
     try:
-        points = db.retrieve(
+        points = get_db().retrieve(
             collection_name=collection_name,
             ids=[meta_id]
         )
@@ -190,10 +174,14 @@ def get_index_status(root_path: str = None) -> str:
 @mcp.tool()
 def start_indexing(root_path: str = None) -> str:
     """
-    Trigger a background indexing task for the specified project.
+    Start building the semantic search index for a project.
+    
+    Required before semantic_code_search can return results.
+    Runs in the background — use get_index_status to monitor progress.
+    You only need to call this once per project (or after code changes).
     
     Args:
-        root_path: Optional path to the project root. Defaults to current workspace.
+        root_path: Project root path. Auto-detected from workspace by default.
     """
     import subprocess
     import os
@@ -207,10 +195,8 @@ def start_indexing(root_path: str = None) -> str:
     
     try:
         # Trigger the CLI indexer in detached mode.
-        # We use 'hivemind' command which should be in the path.
         cmd = ["hivemind", "indexer", "start", str(root), "--detach"]
         
-        # We set the CWD to the root path so that 'hivemind' finds the local config.yaml
         p = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -218,10 +204,26 @@ def start_indexing(root_path: str = None) -> str:
             start_new_session=True,
             cwd=str(root)
         )
+
+        # Persist the PID so it can be tracked externally (e.g. for
+        # graceful shutdown or monitoring).
+        pid_dir = settings.state.directory
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        pid_file = pid_dir / "server_spawned_indexer.pid"
+        pid_file.write_text(f"{p.pid}\n{root}\n")
         
-        return f"Indexing started for {root} (PID: {p.pid}). Use get_index_status to check progress."
+        return (
+            f"Indexing started for {root} (PID: {p.pid}). "
+            f"Use get_index_status to check progress."
+        )
+    except FileNotFoundError:
+        return (
+            "Error: 'hivemind' CLI not found. Ensure the project is "
+            "installed (uv sync) and the hivemind script is on PATH."
+        )
     except Exception as e:
         logger.error(f"Error starting indexer: {e}")
+        return f"Error starting indexer: {str(e)}"
 @mcp.tool()
 def analyze_code_complexity(filepath: str) -> str:
     """
@@ -252,8 +254,11 @@ def generate_blueprint(task: str, context: str) -> str:
     Generate a structured JSON blueprint for a coding task using a flagship model.
     """
     import json
-    blueprint = core_generate_blueprint(task, context)
-    return json.dumps(blueprint, indent=2)
+    try:
+        blueprint = core_generate_blueprint(task, context)
+        return json.dumps(blueprint, indent=2)
+    except BlueprintError as e:
+        return json.dumps({"error": str(e)}, indent=2)
 
 @mcp.tool()
 def run_verification(filepath: str = None) -> str:
@@ -301,6 +306,3 @@ def run_mcp():
     """Entry point for MCP server."""
     logger.info("Starting Hivemind Server on stdio")
     mcp.run()
-
-if __name__ == "__main__":
-    run_mcp()

@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from core.clients import db, get_embedding, check_qdrant_connection
+from core.clients import get_db, get_embedding, check_qdrant_connection
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,9 @@ class EmbedRequest(BaseModel):
 async def health():
     """Detailed health check."""
     qdrant_ok = check_qdrant_connection()
+    # The embedder status is inferred from Qdrant health: a working embedder
+    # is required for indexing, but the health endpoint avoids making an
+    # expensive embedding API call on every probe.
     return {
         "status": "healthy" if qdrant_ok else "degraded",
         "components": {
@@ -48,7 +51,7 @@ async def health():
                 "collection": settings.qdrant.collection_name
             },
             "embedder": {
-                "status": "connected", # get_embedding would fail if not connected
+                "status": "assumed_ok" if qdrant_ok else "unknown",
                 "model": settings.model.model_name
             },
             "version": "0.2.0"
@@ -72,7 +75,7 @@ async def search(request: SearchRequest):
     """Semantic search endpoint."""
     try:
         query_vector = get_embedding(request.query)
-        response = db.query_points(
+        response = get_db().query_points(
             collection_name=settings.qdrant.collection_name,
             query=query_vector,
             limit=request.limit
@@ -96,11 +99,18 @@ async def metrics():
     """Basic metrics."""
     if not settings.observability_metrics_enabled:
         raise HTTPException(status_code=404, detail="Metrics disabled")
-    
-    # In a real app, these would be tracked in state or DB
+
+    points_count = 0
+    if check_qdrant_connection():
+        try:
+            collection_info = get_db().get_collection(settings.qdrant.collection_name)
+            points_count = collection_info.points_count
+        except Exception:
+            logger.warning("Failed to retrieve collection metrics", exc_info=True)
+
     return {
-        "indexed_files_total": 0, # Placeholder
-        "total_chunks_in_db": db.get_collection(settings.qdrant.collection_name).points_count if check_qdrant_connection() else 0,
+        "total_chunks_in_db": points_count,
+        "collection_name": settings.qdrant.collection_name,
         "version": "0.2.0"
     }
 
