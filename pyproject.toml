@@ -5,6 +5,7 @@ description = "Semantic code indexer, search tool, and MCP server for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ddgs>=9.14.1",
     "fastapi>=0.115.0",
     "mcp>=1.0.0",
     "openai>=2.32.0",
@@ -29,11 +30,11 @@ dependencies = [
 
 [project.optional-dependencies]
 web = [
-    "duckduckgo-search>=8.0",
+    "ddgs>=9.0",
 ]
 scout = [
     "crawl4ai>=0.8.6",
-    "duckduckgo-search>=8.0",
+    "ddgs>=9.0",
     "playwright>=1.58.0",
 ]
 
