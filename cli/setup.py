@@ -140,6 +140,3 @@ def setup_wizard():
 
 if __name__ == "__main__":
     setup_wizard()
-
-if __name__ == "__main__":
-    setup_wizard()
