@@ -1,0 +1,542 @@
+= API Reference
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+== MCP Tools (Primary Interface)
+
+Hivemind exposes custom MCP (Model Context Protocol) tools for AI agents. These tools are **preferred** over generic file operations for code discovery and analysis.
+
+The MCP server is implemented in link:../server/server.py[server/server.py] using `FastMCP` and communicates over `stdio`.
+
+=== Tool Hierarchy (Priority Order)
+
+[cols="1,2,5"]
+|===
+| Priority | Tool | When to Use
+
+| 🥇
+| `semantic_code_search`
+| *Always first.* Find code by meaning, not filename. Use natural language queries.
+
+| 🥇
+| `deep_research`
+| *Web research in one call.* Combines `search_web` + `scout_urls` — searches the web, crawls top results, returns chunk-truncated markdown.
+
+| 🥈
+| `get_file_tree`
+| Only for structural overview. Do NOT use to find specific logic.
+
+| 🥈
+| `search_web`
+| Search the internet for documentation, API references, or solutions.
+
+| 🥈
+| `scout_urls`
+| Crawl URLs (from `search_web` results) to get full page markdown content.
+
+| 🥈
+| `read_file`
+| Read file contents with line numbers and slicing. Use when `semantic_code_search` is insufficient.
+
+| 🥉
+| `get_git_history`
+| Get last commit metadata (author, date, message) for any file.
+
+| 🥉
+| `analyze_code_complexity`
+| After finding a file, to determine if a small or flagship model should handle it.
+
+| 🥉
+| `generate_blueprint`
+| For architectural planning before implementing complex features.
+
+| 🥉
+| `run_verification`
+| To run tests and linting before completing a task.
+|===
+
+=== `semantic_code_search`
+
+**Primary tool for code discovery.** Searches the vector index using natural language understanding.
+
+Implementation: link:../server/server.py[server/server.py, 24-105]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `query`
+| Yes
+| —
+| Natural language description of the functionality or logic you're looking for.
+
+| `limit`
+| No
+| `5`
+| Maximum number of results (max 20).
+
+| `root_path`
+| No
+| auto-detected
+| Project root path. Only needed if searching a different project.
+
+| `file_filter`
+| No
+| —
+| Substring filter on file paths (e.g., `"server/"`).
+
+| `language`
+| No
+| —
+| Language filter (e.g., `"python"`, `"typescript"`).
+
+| `is_test`
+| No
+| —
+| `true` for only test files, `false` to exclude them.
+|===
+
+==== Filtering Logic
+
+The tool builds Qdrant `must` filters from the optional parameters:
+
+[source,python]
+----
+must_filters = []
+if file_filter:
+    must_filters.append(FieldCondition(key="filepath", match=MatchText(text=file_filter)))
+if language:
+    must_filters.append(FieldCondition(key="language", match=MatchValue(value=language)))
+if is_test is not None:
+    must_filters.append(FieldCondition(key="is_test", match=MatchValue(value=is_test)))
+search_filter = Filter(must=must_filters) if must_filters else None
+----
+
+=== `deep_research`
+
+**Combine web search + crawling into a single action.** Searches DuckDuckGo for the query, grabs the top URLs, crawls them concurrently, and returns the content as chunk-truncated markdown.
+
+Implementation: link:../server/server.py[server/server.py, 504-617]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `query`
+| Yes
+| —
+| Natural language research query (e.g., `"Python asyncio gather docs"`).
+
+| `max_results`
+| No
+| `3`
+| Maximum number of search results to consider (capped at 10).
+
+| `max_urls`
+| No
+| `3`
+| Maximum number of URLs to crawl from results (capped at 5).
+|===
+
+==== Requirements
+
+* `ddgs` package (DuckDuckGo search).
+* `crawl4ai` and `playwright` (web crawling).
+* Install with: `uv sync --extra scout` then `playwright install chromium`.
+
+=== `get_file_tree`
+
+**Structural overview only.** Returns a directory tree of the project.
+
+Implementation: link:../server/server.py[server/server.py, 107-128]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `root_path`
+| No
+| auto-detected
+| Project root path.
+
+| `depth`
+| No
+| `2`
+| How many levels deep to show.
+|===
+
+The tree rendering is handled by link:../core/filesystem.py[core/filesystem.py, 32-86] which uses Unicode box-drawing characters (`├──`, `└──`, `│`) and respects excluded directories (`.git`, `.venv`, `node_modules`, etc.).
+
+=== `analyze_code_complexity`
+
+Calculates AST depth, dependency count, and complexity score for a file.
+
+Implementation: link:../server/server.py[server/server.py, 228-250], link:../core/complexity.py[core/complexity.py]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `filepath`
+| Yes
+| —
+| Path to the file to analyze.
+|===
+
+==== Complexity Score Heuristic
+
+[source,python]
+----
+complexity_score = (max_depth * 0.4) + (node_count * 0.01) + (def_count * 0.5) + (import_count * 0.2)
+----
+
+* Score > 50: "Escalate to Flagship" (complex file).
+* Score ≤ 50: "Suitable for Small/Local Model".
+
+Supported languages: Python, Go, TypeScript/TSX, YAML, HCL (via tree-sitter).
+
+=== `generate_blueprint`
+
+Generates a structured JSON blueprint for a coding task using a flagship model.
+
+Implementation: link:../server/server.py[server/server.py, 252-262], link:../core/planner.py[core/planner.py]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `task`
+| Yes
+| —
+| Description of the coding task.
+
+| `context`
+| Yes
+| —
+| Context about the codebase (file contents, architecture notes).
+|===
+
+==== Blueprint Format
+
+[source,json]
+----
+[
+  {
+    "file": "path/to/file.py",
+    "action": "modify",
+    "description": "Add authentication middleware",
+    "logic": "def authenticate(request): ..."
+  }
+]
+----
+
+Actions: `create`, `modify`, `delete`, `rename`.
+
+=== `run_verification`
+
+Runs linters and tests for the project or a specific file.
+
+Implementation: link:../server/server.py[server/server.py, 264-304]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `filepath`
+| No
+| —
+| Specific file to test. Runs full suite if omitted.
+|===
+
+==== Test Runner Detection
+
+* `pyproject.toml` or `pytest.ini` exists → runs `uv run pytest`.
+* `package.json` exists → runs `npm test`.
+* Otherwise → returns an error.
+
+Output is truncated to 2000 characters (1000 head + 1000 tail) to keep responses concise.
+
+=== `get_index_status` / `start_indexing`
+
+Manage the semantic search index lifecycle.
+
+Implementation: link:../server/server.py[server/server.py, 130-227]
+
+==== `get_index_status`
+
+Checks if the semantic search index is ready for a project. Reads a metadata point from Qdrant (stored with a deterministic UUID derived from the workspace path).
+
+Returns: `"Complete"`, `"In Progress / Stale"`, or `"Not Indexed"`.
+
+==== `start_indexing`
+
+Starts the indexing process by spawning `hivemind indexer start <path> --detach` as a subprocess. The PID is persisted to `{state_dir}/server_spawned_indexer.pid`.
+
+=== `search_web`
+
+**Search the internet using DuckDuckGo.** Returns title, URL, and snippet for each result.
+
+Implementation: link:../server/server.py[server/server.py, 306-343], link:../core/search.py[core/search.py]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `query`
+| Yes
+| —
+| The search query string (e.g., `"python asyncio gather documentation"`).
+
+| `max_results`
+| No
+| `10`
+| Maximum results (capped at 20).
+|===
+
+==== Backend Support
+
+The search backend is configurable via `scout.search_backend`:
+
+* `duckduckgo` — Zero-config, no API key required (default).
+* `brave` — Requires `brave_api_key` in config.
+* `searxng` — Requires `searxng_url` in config.
+
+=== `scout_urls`
+
+**Crawl one or more URLs and return their content as markdown.** Supports a Map-Reduce pattern for large pages.
+
+Implementation: link:../server/server.py[server/server.py, 346-501], link:../scout/crawler.py[scout/crawler.py], link:../scout/chunk_cache.py[scout/chunk_cache.py]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `urls`
+| Yes
+| —
+| List of URLs to crawl.
+
+| `max_results`
+| No
+| `3`
+| Maximum URLs to process (capped at 10).
+
+| `mode`
+| No
+| `"full"`
+| One of `"full"`, `"toc"`, `"sections"`.
+
+| `sections`
+| No
+| —
+| Dict mapping URLs to lists of section names/indices (for `mode="sections"`).
+|===
+
+==== Usage Flow for Large Pages
+
+. `scout_urls(["https://github.com/org/repo/pull/123"], mode="toc")` → get TOC.
+. `scout_urls(["https://github.com/org/repo/pull/123"], mode="sections", sections={"https://github.com/org/repo/pull/123": ["Conversation", "Checks"]})` → get only relevant sections (~4500 tokens instead of 22000+).
+
+==== Chunk Cache
+
+The `ChunkCache` (link:../scout/chunk_cache.py[scout/chunk_cache.py]) is a thread-safe, TTL-based (10 minutes) in-memory store. Each crawled URL is chunked via `MarkdownChunker` and cached keyed by a SHA-256 hash of the URL.
+
+=== `read_file`
+
+**Read file contents with line numbers and slicing.** Use when `semantic_code_search` doesn't give you enough context.
+
+Implementation: link:../server/server.py[server/server.py, 620-667]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `filepath`
+| Yes
+| —
+| Path to the file (relative to workspace or absolute).
+
+| `start_line`
+| No
+| `1`
+| First line to read (1-based).
+
+| `max_lines`
+| No
+| `500`
+| Maximum lines to return (capped at 1000).
+|===
+
+==== Safety
+
+Refuses to read from excluded directories (`.git`, `node_modules`, `__pycache__`, etc.) by checking each path component against `EXCLUDED_DIRS` from link:../core/filesystem.py[core/filesystem.py].
+
+=== `get_git_history`
+
+**Get git commit metadata for a file.** Returns the last commit's hash, author, email, date, and subject.
+
+Implementation: link:../server/server.py[server/server.py, 670-707], link:../indexer/git_utils.py[indexer/git_utils.py]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `filepath`
+| Yes
+| —
+| Path to the file (relative to workspace root).
+|===
+
+==== Graceful Degradation
+
+* Returns a clear message for non-git repos.
+* Returns a clear message for untracked files or files with no commits.
+
+== REST API Reference
+
+The Hivemind REST API provides programmatic access to search and embedding features.
+
+Implementation: link:../server/api.py[server/api.py]
+
+=== Authentication
+
+If configured, requests must include the API key in the header defined by `security.api_key_header` (default: `X-API-Key`).
+
+The `verify_api_key` dependency in link:../server/api.py[server/api.py, 27-30] is a simple pass-through for now; production deployments should implement proper key validation against `secrets.yaml`.
+
+=== Endpoints
+
+==== `GET /health`
+
+Returns detailed health status of the system.
+
+[source,json]
+----
+{
+  "status": "healthy",
+  "components": {
+    "qdrant": { "status": "connected", "collection": "hivemind_code" },
+    "embedder": { "status": "assumed_ok", "model": "qwen3-4B-embedding" },
+    "version": "0.2.0"
+  }
+}
+----
+
+The embedder status is inferred from Qdrant health (avoids expensive embedding API calls on every probe).
+
+==== `POST /embed`
+
+Generates a vector embedding for the provided text.
+
+*Request:*
+[source,json]
+----
+{
+  "text": "code snippet or query"
+}
+----
+
+*Response:*
+[source,json]
+----
+{
+  "embedding": [0.123, -0.456, ...],
+  "model": "qwen3-4B-embedding"
+}
+----
+
+==== `POST /search`
+
+Performs a semantic search.
+
+*Request:*
+[source,json]
+----
+{
+  "query": "how do I handle auth?",
+  "limit": 5
+}
+----
+
+*Response:*
+[source,json]
+----
+{
+  "results": [
+    {
+      "filepath": "src/auth.py",
+      "content": "def authenticate(...)",
+      "score": 0.89,
+      "chunk_index": 2
+    }
+  ]
+}
+----
+
+==== `GET /metrics`
+
+Returns system metrics (only if `observability_metrics_enabled` is `true`).
+
+[source,json]
+----
+{
+  "total_chunks_in_db": 5678,
+  "collection_name": "hivemind_code",
+  "version": "0.2.0"
+}
+----
+
+== Qdrant Collection Schema
+
+When `init_collection()` (link:../core/clients.py[core/clients.py, 125-178]) creates a new collection, it:
+
+. Creates a collection with `COSINE` distance and the configured `embedding_dim`.
+. Creates a payload index on the `type` field (for filtering metadata vs. code points).
+. Creates payload indexes on `path_segments.0` through `path_segments.4` for hierarchical directory filtering.
+
+Each indexed chunk has the following payload structure:
+
+[source,json]
+----
+{
+  "filepath": "src/server.py",
+  "content": "def handle_request(): ...",
+  "chunk_index": 0,
+  "language": "python",
+  "line_start": 10,
+  "line_end": 25,
+  "is_test": false,
+  "symbols": ["handle_request"],
+  "type": "code",
+  "path_segments": {
+    "0": "src",
+    "1": "server.py"
+  },
+  "commit_hash": "abc123",
+  "commit_author": "developer",
+  "commit_date": "2025-01-01",
+  "commit_subject": "Add request handler"
+}
+----

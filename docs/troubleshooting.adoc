@@ -1,0 +1,193 @@
+= Troubleshooting
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+== Connection Issues
+
+=== "Failed to fetch embedding"
+
+* **Check API URL**: Ensure `model.api_url` is correct (default: `http://localhost:1234/v1`).
+* **Check Model Server**: Verify that LM Studio or your embedding service is running and accessible. The embedding API must be OpenAI-compatible.
+* **Network**: If using a remote server, check firewall settings or VPN/Wireguard status.
+* **Batch Size**: If you're embedding many files, the `batch_size` setting (default: 100) may cause timeouts. Try reducing it.
+* **Retry Logic**: The `get_embeddings_batch()` function in link:../core/clients.py[core/clients.py, 74-103] uses `tenacity` with exponential backoff (3 retries, 4-10 second wait). Check the logs for retry attempts.
+
+=== "Qdrant connection refused"
+
+* **Check Docker**: Ensure the Qdrant container is running: `docker ps | grep hivemind-qdrant`.
+* **Check Port**: Verify Qdrant is listening on the configured port (default: `6333`): `curl http://localhost:6333/health`.
+* **Start Qdrant**: Run `docker compose -f infra/compose.yml up -d` from the project root.
+* **Remote Qdrant**: If using a remote instance, ensure the URL is correct and network access is available.
+
+=== Embedding Dimension Mismatch
+
+If you change the embedding model and its dimension differs from the existing Qdrant collection:
+
+[source]
+----
+ValueError: Embedding dimension mismatch: existing collection has dimension 2500,
+but configuration specifies 1536. Please update 'embedding_dim' in your config
+or delete the collection to recreate it.
+----
+
+**Solution**: Either update `embedding_dim` in your config to match the existing collection, or delete the collection and re-index:
+
+[source,bash]
+----
+hivemind indexer clean --force
+hivemind indexer start .
+----
+
+== Indexing Issues
+
+=== Files not being indexed
+
+* **Extensions**: Ensure the file extension is in the supported list (defined in link:../indexer/preprocessors/text.py[indexer/preprocessors/text.py, 10-13]).
+* **State**: If a file was already indexed and hasn't changed, the Indexer will skip it. Use `--verbose` to see skip logs.
+* **Ignored Paths**: Files in `.venv/`, `.git/`, `node_modules/`, `__pycache__/`, `build/`, `dist/`, `.idea/`, `.vscode/` are automatically ignored (see link:../core/filesystem.py[core/filesystem.py, 19-22]).
+* **Git Ignored**: If `git_enabled` is `true` and the file matches `.gitignore` patterns, it will be skipped.
+* **Git Only Tracked**: If `git_only_tracked` is `true`, only files tracked by git are indexed.
+
+=== Indexer crashes or hangs
+
+* **Check logs**: Look at the configured log file (default: `.hivemind/hivemind.log`) or run with `--verbose`.
+* **Worker count**: If you have many small files, increasing `indexer_workers` may help. If you have large files, decreasing it may reduce memory pressure.
+* **Queue backpressure**: The bounded task queue (`maxsize = workers * 100`) provides natural backpressure. If the queue is full, the scanner blocks.
+* **Graceful shutdown**: The indexer handles `SIGTERM` and `Ctrl+C` for clean shutdown. If it was killed forcefully, check for stale PID files in `.hivemind/state/`.
+
+=== "hivemind" CLI not found
+
+If the `hivemind` command is not available after installation:
+
+[source,bash]
+----
+# Ensure the project is installed
+uv sync
+
+# Check if the script is on PATH
+which hivemind
+
+# If not, add the uv tools directory to PATH
+export PATH="$HOME/.local/bin:$PATH"
+----
+
+== MCP Issues
+
+=== Cursor/Claude can't connect
+
+* **Log to stderr**: Ensure you aren't using `print()` in `server/server.py` for anything other than actual tool output. Use the provided `logger` which writes to `stderr`.
+* **Absolute Paths**: When configuring MCP in your IDE, use absolute paths for both `uv` and the project directory.
+* **MCP Configuration Example** (for Cursor/Claude Desktop):
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "hivemind": {
+      "command": "/full/path/to/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/full/path/to/hivemind",
+        "python",
+        "main.py",
+        "mcp"
+      ]
+    }
+  }
+}
+----
+
+=== MCP tool returns "Error: 'hivemind' CLI not found"
+
+This happens when the `start_indexing` MCP tool tries to spawn the indexer but the `hivemind` script is not on the system PATH. Ensure the project is installed:
+
+[source,bash]
+----
+uv sync
+# Or install the CLI globally
+pip install -e .
+----
+
+== Scout Issues
+
+=== "Scout dependencies are not installed"
+
+The scout module requires optional dependencies:
+
+[source,bash]
+----
+uv sync --extra scout
+playwright install chromium
+----
+
+=== Crawl returns no content
+
+* **Content filter**: If `content_filter` is enabled, `crawl4ai`'s `PruningContentFilter` may strip too much content. Try disabling it.
+* **JavaScript rendering**: Some sites require JavaScript rendering. The crawler uses a headless Chromium browser via `playwright`.
+* **Rate limiting**: The crawler uses polite delays (default: 1-3 seconds). Some sites may still block the crawler. Try increasing the delay with `--delay`.
+* **Stealth mode**: If `use_stealth` is enabled, the crawler tries to avoid detection. If a site is blocking you, try disabling it.
+
+=== Recursive crawling is too slow
+
+* **Reduce max pages**: Lower `max_pages_per_domain` (default: 50).
+* **Increase concurrency**: Raise `concurrency_limit` (default: 5).
+* **Use include patterns**: Restrict crawling to relevant paths with `--include`.
+* **Use stay-in-path**: Only follow URLs under the seed URL's path.
+
+== Search Issues
+
+=== Semantic search returns no results
+
+* **Check index status**: Use the `get_index_status` MCP tool or check if the indexer has completed.
+* **Check collection**: Verify the Qdrant collection exists and has points: `curl http://localhost:6333/collections/hivemind_code`.
+* **Check query**: Try a simpler or more specific query.
+* **Check filters**: If you're using `file_filter`, `language`, or `is_test` filters, ensure they match your indexed data.
+
+=== Search results are poor
+
+* **Embedding model**: The quality of results depends heavily on the embedding model. Consider using a higher-quality model.
+* **Chunk size**: Smaller chunks provide more precise matches but may miss context. Larger chunks provide more context but may be less precise.
+* **Re-index**: If you've changed the chunking strategy or embedding model, clean and re-index: `hivemind indexer clean --force && hivemind indexer start .`.
+
+== REST API Issues
+
+=== API returns 404 on /metrics
+
+The `/metrics` endpoint is only available when `observability_metrics_enabled` is `true` (default). Check your configuration.
+
+=== CORS errors
+
+If you're accessing the API from a browser and getting CORS errors, check the `api.cors_origins` setting (default: `["*"]`).
+
+== Logs and Debugging
+
+=== Log Locations
+
+* **Terminal**: Logs are displayed via Rich handler when running interactively.
+* **File**: If `logging.file_path` is configured, logs are also written to that file (default: `.hivemind/hivemind.log` after `hivemind init`).
+* **MCP Server**: Logs go to `stderr` (to avoid interfering with `stdio` protocol).
+
+=== Verbose Mode
+
+Most commands support `--verbose` for detailed logging at `DEBUG` level:
+
+[source,bash]
+----
+hivemind indexer start . --verbose
+hivemind scout crawl https://example.com --verbose
+hivemind search "query" --verbose
+----
+
+=== State File Inspection
+
+The indexing state is stored in `.hivemind/state/state.yaml`. You can inspect it directly:
+
+[source,bash]
+----
+cat .hivemind/state/state.yaml
+----
+
+This shows which files have been indexed, their checksums, modification times, and chunk counts.

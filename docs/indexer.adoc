@@ -1,0 +1,263 @@
+= Indexer Deep Dive
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+This document provides an in-depth look at the Hivemind Indexer component — how it discovers, processes, chunks, embeds, and stores code for semantic search.
+
+== Architecture Overview
+
+The indexer is a multi-threaded pipeline with four stages:
+
+. **Scanner** — Walks the filesystem to discover files needing indexing.
+. **Watcher** — Listens for file system events (create, modify) via `watchdog`.
+. **Workers** — Concurrent `IndexWorker` threads that process files.
+. **State Manager** — Tracks file checksums and modification times for incremental indexing.
+
+[source]
+----
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────┐
+│   Scanner   │ ──▶ │ Bounded Queue │ ──▶ │ IndexWorker  │ ──▶ │  Qdrant  │
+│ (os.walk)   │     │ (maxsize)    │     │ (thread x N) │     │          │
+└─────────────┘     └──────────────┘     └──────────────┘     └──────────┘
+                                                                    ▲
+┌─────────────┐                                          ┌──────────┘
+│   Watcher   │ ──▶ Bounded Queue ──▶ IndexWorker ───────┘
+│ (watchdog)  │
+└─────────────┘
+----
+
+Implementation: link:../indexer/watcher.py[indexer/watcher.py]
+
+== File Discovery
+
+=== Initial Scan
+
+When `indexer.start(path)` is called, the `_scan_directory()` method performs a full recursive walk of the target directory using `os.walk()`:
+
+. Prunes excluded directories (`.git`, `.venv`, `node_modules`, etc.) from the walk.
+. Checks git-ignored paths (if `git_enabled`).
+. Checks if the file needs re-indexing via `StateManager.should_reindex()`.
+. Enqueues qualifying file paths onto the bounded task queue.
+
+The scan displays a Rich progress bar showing the current file being examined.
+
+=== File System Watching
+
+After the initial scan, if `--watch` is enabled, a `watchdog` `Observer` monitors the filesystem for changes:
+
+* `on_modified` — File content changed.
+* `on_created` — New file created.
+
+Both events are handled by link:../indexer/code_handler.py[indexer/code_handler.py] which validates the file against extension lists, excluded directories, and git ignore rules before enqueuing.
+
+=== Supported File Types
+
+The supported extensions are dynamically discovered from registered pre-processors in link:../indexer/preprocessors/manager.py[indexer/preprocessors/manager.py]. The default set includes:
+
+.Code files: `.py`, `.go`, `.js`, `.ts`, `.tsx`, `.c`, `.h`, `.sh`, `.tf`, `.css`, `.scss`
+.Documentation: `.md`, `.txt`, `.yaml`, `.yml`, `.toml`, `.conf`, `.adoc`
+.Special: `Dockerfile`
+.Binary documents: `.pdf` (extracted via `pypdf`), `.docx` (placeholder)
+
+== The Bounded Queue
+
+The `task_queue` is a `queue.Queue(maxsize=settings.indexer_workers * 100)`. This design provides:
+
+* **Natural backpressure**: When the queue is full, the scanner blocks, preventing unbounded memory growth during large initial scans.
+* **Clean shutdown**: Sending `None` sentinels signals workers to exit gracefully.
+* **Thread safety**: The standard library queue handles all synchronization.
+
+== Worker Pipeline
+
+Each `IndexWorker` (link:../indexer/index_worker.py[indexer/index_worker.py]) is a daemon thread that loops on the task queue. For each file, it executes a four-stage pipeline:
+
+=== Stage 1: Preprocessing
+
+The file is passed to `PreprocessorManager.preprocess()` which:
+
+. Looks up the appropriate pre-processor by file extension or filename.
+. For text files (`.py`, `.md`, etc.): reads the file as UTF-8 text.
+. For PDFs: extracts text via `pypdf`, converts to structured Markdown with metadata frontmatter.
+. For DOCX: returns a placeholder (requires `python-docx` for full support).
+
+If preprocessing fails, the file is skipped with an error log.
+
+=== Stage 2: Chunking
+
+The extracted text is split into chunks using the configured strategy:
+
+[source,python]
+----
+if settings.chunking.strategy == "by_lines":
+    self.chunker = ByLinesChunker(...)
+elif settings.chunking.strategy == "ast":
+    self.chunker = ASTChunker(...)
+else:
+    self.chunker = BySizeChunker(...)
+----
+
+For Markdown files (`.md` extension) or files that look like Markdown (start with `# ` or `---`), a specialized `MarkdownChunker` is used instead, which splits on headers.
+
+See link:../indexer/chunkers/[indexer/chunkers/] for all chunker implementations.
+
+=== Stage 3: Embedding
+
+Chunk texts are batched and sent to the embedding API:
+
+[source,python]
+----
+texts = [chunk.content for chunk in chunks]
+vectors = get_embeddings_batch(texts)
+----
+
+The `get_embeddings_batch()` function (link:../core/clients.py[core/clients.py, 79-103]):
+
+. Processes texts in sub-batches of `batch_size` (default: 100).
+. Uses `tenacity` retry with exponential backoff (3 retries, 4-10 second wait).
+. Returns a list of embedding vectors matching the input texts.
+
+=== Stage 4: Upsert
+
+Each chunk is packaged into a Qdrant point with flat, filterable metadata:
+
+[source,python]
+----
+payload = {
+    "filepath": chunk.filepath,
+    "content": chunk.content,
+    "chunk_index": chunk.chunk_index,
+    "language": language,
+    "line_start": chunk.line_start,
+    "line_end": chunk.line_end,
+    "is_test": is_test,
+    "symbols": chunk.metadata.get("symbols", []),
+    "type": "code",
+    "path_segments": path_segments,
+    **git_metadata  # commit_hash, commit_author, commit_date, commit_subject
+}
+----
+
+Points are upserted to Qdrant in a single batch call.
+
+=== Timing
+
+Each file's indexing time is logged:
+
+[source]
+----
+Indexed src/server.py: 12 chunks in 1.34s (chunk: 0.01s, embed: 1.20s, upsert: 0.13s)
+----
+
+This helps identify bottlenecks (embedding is typically the slowest stage).
+
+== Incremental Indexing
+
+The `StateManager` (link:../indexer/state.py[indexer/state.py]) tracks each indexed file's state in `.hivemind/state/state.yaml`:
+
+[source,yaml]
+----
+indexed_files:
+  /path/to/file.py:
+    last_modified: "2025-01-01T12:00:00"
+    checksum: "abc123..."
+    chunk_count: 5
+    indexed_at: "2025-01-01T12:00:05"
+----
+
+The `should_reindex()` method:
+
+. Checks if the file is in the state file. If not → needs indexing.
+. Compares the stored `last_modified` with the current file mtime. If different → computes SHA-256 checksum.
+. If checksums differ → needs re-indexing.
+. If checksums match → skip (file hasn't changed).
+
+The lock is held for the entire decision to avoid TOCTOU race conditions.
+
+== Git Integration
+
+The `GitManager` (link:../indexer/git_utils.py[indexer/git_utils.py]) provides:
+
+* **`.gitignore` filtering**: Uses `pathspec` to match files against `.gitignore` patterns.
+* **Tracked-only mode**: When `git_only_tracked` is `true`, only files tracked by git are indexed.
+* **Commit metadata**: For each indexed file, the last commit's hash, author, email, date, and subject are extracted and stored in the Qdrant payload.
+
+== Chunking Strategies
+
+=== BySizeChunker
+
+Splits text into chunks of approximately `chunk_size` characters with `overlap` characters of overlap between consecutive chunks. Simple, fast, language-agnostic.
+
+=== ByLinesChunker
+
+Splits text into chunks of exactly `chunk_lines` lines with `overlap_lines` lines of overlap. Useful for uniform line-based analysis.
+
+=== ASTChunker
+
+Uses tree-sitter to parse code into an AST, then creates chunks that respect function/class boundaries:
+
+. Non-definition code (imports, module-level statements) is grouped into "general" chunks.
+. Each function/class definition becomes its own chunk (or multiple chunks if it exceeds `chunk_lines`).
+. Definition chunks carry metadata: `{"type": "function_definition", "symbols": ["function_name"]}`.
+
+Supported languages: Python, Go, TypeScript, TSX, YAML, HCL.
+
+The AST chunker also sanitizes content by stripping base64 payloads and excessively long strings.
+
+=== MarkdownChunker
+
+Splits Markdown content on headers (`#`, `##`, etc.):
+
+. Content before the first header becomes a "markdown_intro" chunk.
+. Each header section becomes a chunk with metadata: `{"type": "markdown_h2", "symbols": ["Section Title"]}`.
+. If a section exceeds `chunk_lines`, it's further split with overlap.
+
+== Preprocessors
+
+The `PreprocessorManager` (link:../indexer/preprocessors/manager.py[indexer/preprocessors/manager.py]) uses dynamic discovery to find pre-processor classes:
+
+. Scans the `indexer/preprocessors/` directory for modules.
+. Imports each module and finds classes inheriting from `BasePreprocessor`.
+. Registers each class by its `supported_extensions`.
+
+=== TextPreprocessor
+
+Handles all plain text and code files. Reads as UTF-8 with error replacement.
+
+=== PdfPreprocessor
+
+Extracts text from PDFs using `pypdf`:
+
+. Reads metadata (title, author, subject) into YAML frontmatter.
+. Processes each page, extracting text.
+. Identifies potential headers via heuristics (short lines without periods).
+. Detects images and inserts graphic placeholders.
+
+=== DocxPreprocessor
+
+Currently a placeholder. Returns a message indicating that actual extraction requires `python-docx` or similar.
+
+== Indexing Metadata
+
+After the initial scan completes, the indexer upserts a metadata point to Qdrant:
+
+[source,python]
+----
+payload = {
+    "type": "metadata",
+    "workspace_path": str(workspace_path),
+    "indexing_complete": True,
+    "last_indexed_at": datetime.now().isoformat(),
+}
+----
+
+This metadata point is read by the `get_index_status` MCP tool to report indexing status.
+
+== Graceful Shutdown
+
+The indexer handles:
+
+* **SIGTERM**: Caught via `signal.signal(signal.SIGTERM, self._handle_exit)` → stops observer, sends `None` sentinels to workers, joins threads, flushes state, removes PID file.
+* **Ctrl+C**: Caught via `KeyboardInterrupt` → same shutdown sequence.
+* **'d' key**: In interactive mode, pressing 'd' detaches the indexer to the background.

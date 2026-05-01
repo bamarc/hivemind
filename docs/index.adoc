@@ -1,0 +1,213 @@
+= Hivemind Documentation
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+:description: Complete documentation for the Hivemind semantic code indexer and search tool.
+
+Hivemind is a semantic code indexer and search tool. It indexes local codebases and web documentation, stores vector embeddings in Qdrant, and exposes search capabilities via MCP (Model Context Protocol) and REST API.
+
+== Quick Navigation
+
+[cols="3,2,5"]
+|===
+| Document | Audience | Covers
+
+| link:architecture.adoc[Architecture]
+| All developers
+| System design, component boundaries, data flow, key design decisions
+
+| link:api.adoc[API Reference]
+| AI agents, integrators
+| MCP tools, REST endpoints, Qdrant schema, parameter reference
+
+| link:cli.adoc[CLI Reference]
+| End users, operators
+| All commands, options, detach mode, URL expansion
+
+| link:configuration.adoc[Configuration]
+| Operators, integrators
+| Full settings schema, environment variables, YAML config
+
+| link:indexer.adoc[Indexer Deep Dive]
+| Contributors
+| Pipeline stages, chunking strategies, preprocessors, state management
+
+| link:scout.adoc[Scout Deep Dive]
+| Contributors
+| Web crawling, Map-Reduce pattern, chunk cache, URL management
+
+| link:deployment.adoc[Deployment Guide]
+| Operators
+| systemd, PM2, Docker, installation profiles
+
+| link:troubleshooting.adoc[Troubleshooting]
+| All users
+| Connection, indexing, MCP, scout, search, API issues
+|===
+
+== Getting Started
+
+=== Prerequisites
+
+* Python 3.12+
+* `uv` package manager (install via `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+* A running Qdrant instance (see link:deployment.adoc#docker[Docker setup])
+* An OpenAI-compatible embedding API (e.g., LM Studio)
+
+=== Quick Install
+
+[source,bash]
+----
+# Clone and install
+git clone <repo>
+cd hivemind
+./setup.sh
+
+# Initialize a project
+cd /path/to/your/codebase
+hivemind init
+
+# Start indexing
+hivemind indexer start .
+
+# Search
+hivemind search "authentication logic"
+----
+
+=== MCP Integration
+
+Configure in your IDE (Cursor, Claude Desktop, etc.):
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "hivemind": {
+      "command": "/full/path/to/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/full/path/to/hivemind",
+        "python",
+        "main.py",
+        "mcp"
+      ]
+    }
+  }
+}
+----
+
+== Project Overview
+
+=== Directory Structure
+
+[source]
+----
+hivemind/
+├── core/               # Shared: config, clients, search, filesystem
+│   ├── clients.py      # Qdrant + OpenAI lazy singletons
+│   ├── config.py       # Pydantic settings (YAML + env vars)
+│   ├── search.py       # Pluggable web search backends
+│   ├── complexity.py   # AST-based complexity analysis
+│   ├── planner.py      # LLM blueprint generation
+│   ├── filesystem.py   # Safe file I/O, tree rendering
+│   └── language_support.py  # Tree-sitter language definitions
+├── indexer/            # Ingestion pipeline
+│   ├── watcher.py      # Scanner + watchdog observer
+│   ├── index_worker.py # Worker thread (chunk → embed → upsert)
+│   ├── state.py        # Incremental indexing state
+│   ├── git_utils.py    # Git ignore + commit metadata
+│   ├── code_handler.py # Watchdog event handler
+│   ├── chunkers/       # Pluggable chunking strategies
+│   │   ├── base.py     # Abstract Chunk + ChunkingStrategy
+│   │   ├── by_size.py  # Character-size chunking
+│   │   ├── by_lines.py # Line-count chunking
+│   │   ├── ast.py      # Tree-sitter AST-aware chunking
+│   │   └── markdown.py # Header-aware Markdown chunking
+│   └── preprocessors/  # File pre-processing
+│       ├── base.py     # Abstract BasePreprocessor
+│       ├── text.py     # Plain text/code reader
+│       ├── pdf.py      # PDF extraction via pypdf
+│       └── docx.py     # DOCX placeholder
+├── server/             # Interfaces
+│   ├── server.py       # MCP server (FastMCP)
+│   └── api.py          # REST API (FastAPI)
+├── scout/              # Web crawling
+│   ├── crawler.py      # crawl4ai wrapper
+│   ├── manager.py      # Crawl orchestration
+│   ├── chunk_cache.py  # In-memory TTL cache
+│   └── chunk_formatter.py  # TOC + section formatting
+├── cli/                # CLI entry points
+│   ├── indexer_commands.py
+│   ├── scout_commands.py
+│   ├── search_command.py
+│   ├── web_search_command.py
+│   ├── server_commands.py
+│   ├── project_commands.py
+│   └── setup.py
+├── infra/
+│   └── compose.yml     # Qdrant Docker Compose
+├── docs/               # Documentation (AsciiDoc)
+│   ├── index.adoc      # ← You are here
+│   ├── architecture.adoc
+│   ├── api.adoc
+│   ├── cli.adoc
+│   ├── configuration.adoc
+│   ├── indexer.adoc
+│   ├── scout.adoc
+│   ├── deployment.adoc
+│   └── troubleshooting.adoc
+├── tests/              # Test suite (319 tests)
+├── main.py             # CLI entry point
+├── pyproject.toml      # Project metadata + dependencies
+└── AGENTS.md           # Agent protocol
+----
+
+=== Component Boundaries
+
+The project enforces strict separation of concerns (see link:../AGENTS.md[AGENTS.md]):
+
+* `core/` — The **only** place where external API clients (Qdrant, OpenAI) are instantiated.
+* `indexer/` — Handles file reading, chunking, and ingestion. Never handles user queries.
+* `server/` — Handles MCP tool definitions and LLM interactions. Never reads local files directly (delegates to `core/filesystem.py`).
+* `scout/` — Handles web crawling. Used by the server for `scout_urls` and `deep_research` tools.
+* `cli/` — Contains execution scripts and CLI wrappers.
+* `infra/` — Contains deployment artifacts only.
+
+== Key Concepts
+
+=== Semantic Search Pipeline
+
+. **Indexing**: Files are discovered → preprocessed → chunked → embedded → stored in Qdrant with flat, filterable metadata.
+. **Search**: Queries are embedded → Qdrant performs vector similarity search → results are formatted as Markdown or JSON.
+. **Incremental**: Only changed files are re-indexed, tracked via SHA-256 checksums and modification times.
+
+=== Chunking Strategies
+
+| Strategy | Method | Best For |
+|----------|--------|----------|
+| `ast` (default) | Tree-sitter AST, preserves function/class boundaries | Code files with known languages |
+| `by_size` | Fixed character count with overlap | Any text, language-agnostic |
+| `by_lines` | Fixed line count with overlap | Uniform line-based analysis |
+| Markdown | Header-aware splitting | `.md` files, documentation |
+
+=== Map-Reduce for Web Pages
+
+The scout module implements a Map-Reduce pattern for large web pages:
+
+. **Map**: Crawl URL → chunk content → cache in memory.
+. **Reduce (TOC)**: Return Table of Contents with section names and token estimates.
+. **Reduce (Sections)**: Return only requested sections from cache.
+
+This avoids context-window overflow from giant documentation pages or GitHub PRs.
+
+== Version
+
+Current version: `0.1.4` (see link:../pyproject.toml[pyproject.toml]).
+
+== Security Disclaimer
+
+**Hivemind is not hardened against prompt injection.** The MCP server executes tools based on instructions from AI agents, which may be influenced by untrusted content (e.g., web pages crawled via `scout_urls` or `deep_research`, or code files indexed from a repository). An attacker who can inject malicious instructions into crawled content could potentially trick the agent into performing unintended operations.
+
+By using Hivemind, you acknowledge and accept this risk. The authors and contributors provide this software "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors or contributors be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.

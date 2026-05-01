@@ -1,0 +1,363 @@
+= Configuration Reference
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+Hivemind uses Pydantic Settings for flexible and type-safe configuration.
+
+Implementation: link:../core/config.py[core/config.py]
+
+== Configuration Methods
+
+Settings are loaded in the following order of precedence (later overrides earlier):
+
+. **Defaults**: Defined in `core/config.py` as Pydantic model defaults.
+. **YAML Files** (in order):
+.. `.hivemind/config.yaml` — Project-local configuration in the `.hivemind` directory.
+.. `config.yaml` — Legacy project-local configuration in the workspace root.
+. **Environment Variables**: Prefixed with `HIVEMIND_`.
+
+=== Environment Variables
+
+Nested settings are accessed using double underscores `__`.
+
+[source,bash]
+----
+# Override Qdrant URL
+export HIVEMIND_QDRANT__URL="http://192.168.1.100:6333"
+
+# Override embedding model
+export HIVEMIND_MODEL__MODEL_NAME="text-embedding-3-small"
+export HIVEMIND_MODEL__EMBEDDING_DIM=1536
+
+# Override scout settings
+export HIVEMIND_SCOUT__RECURSIVE=true
+export HIVEMIND_SCOUT__MAX_PAGES_PER_DOMAIN=100
+----
+
+== Settings Schema
+
+=== Qdrant (`qdrant`)
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `url`
+| `http://localhost:6333`
+| URL of the Qdrant instance.
+
+| `api_key`
+| `null`
+| API Key for Qdrant (if authentication is enabled).
+
+| `collection_name`
+| `hivemind_code`
+| Name of the collection in Qdrant.
+|===
+
+=== Embedding (`model`)
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `api_url`
+| `http://localhost:1234/v1`
+| URL of the OpenAI-compatible embedding API.
+
+| `model_name`
+| `qwen3-4B-embedding`
+| Name of the embedding model.
+
+| `api_key`
+| `null`
+| API Key for the embedding service.
+
+| `embedding_dim`
+| `2500`
+| Dimension of the generated vectors. Must match the model's output dimension.
+
+| `batch_size`
+| `100`
+| Batch size for embedding requests. Texts are processed in sub-batches to avoid API limits.
+|===
+
+IMPORTANT: If the `embedding_dim` changes after a collection already exists, `init_collection()` will raise a `ValueError` with instructions to update the config or delete the collection.
+
+=== Chat (`chat`)
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `api_url`
+| `http://localhost:1234/v1`
+| URL of the OpenAI-compatible chat API (for blueprint generation).
+
+| `model_name`
+| `gpt-4o`
+| Name of the flagship model for blueprint generation.
+
+| `api_key`
+| `null`
+| API Key for the chat service.
+|===
+
+=== Scout (`scout`)
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `urls`
+| `[]`
+| Seed URLs to scout for documentation.
+
+| `output_directory`
+| `.hivemind/scout`
+| Where to save crawled markdown (inside `.hivemind` directory).
+
+| `recursive`
+| `false`
+| Enable recursive crawling (following links).
+
+| `max_pages_per_domain`
+| `50`
+| Max pages to crawl per domain.
+
+| `content_filter`
+| `true`
+| Enable noise removal from crawled pages (via `crawl4ai`'s `PruningContentFilter`).
+
+| `exclude_patterns`
+| `["*login*", "*signup*", "*cart*", "*pricing*"]`
+| Glob patterns to exclude from crawling.
+
+| `include_patterns`
+| `[]`
+| Glob patterns to include (only URLs matching these are crawled).
+
+| `skip_existing`
+| `true`
+| Skip URLs that have already been crawled (detected via frontmatter in saved files).
+
+| `concurrency_limit`
+| `5`
+| Maximum number of concurrent crawl requests.
+
+| `headless`
+| `true`
+| Run browser in headless mode.
+
+| `use_stealth`
+| `true`
+| Enable stealth mode to avoid detection.
+
+| `base_delay`
+| `(1.0, 3.0)`
+| Base delay range between requests (min, max) in seconds. A plain float is normalised to `(delay, delay*2)`.
+
+| `search_backend`
+| `duckduckgo`
+| Web search backend. One of: `duckduckgo`, `brave`, `searxng`.
+
+| `brave_api_key`
+| `null`
+| API key for Brave Search (required if backend is `brave`).
+
+| `searxng_url`
+| `http://localhost:8888`
+| URL of SearXNG instance (required if backend is `searxng`).
+|===
+
+=== Chunking
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `strategy`
+| `ast`
+| Strategy to use: `by_size`, `by_lines`, or `ast`.
+
+| `language_aware`
+| `true`
+| Enable AST-aware chunking (where supported).
+
+| `by_size.chunk_size`
+| `500`
+| Target character size per chunk.
+
+| `by_size.overlap`
+| `50`
+| Character overlap between chunks.
+
+| `by_lines.chunk_lines`
+| `50`
+| Number of lines per chunk.
+
+| `by_lines.overlap_lines`
+| `5`
+| Line overlap between chunks.
+
+| `ast.chunk_lines`
+| `50`
+| Number of lines per chunk (for AST mode).
+
+| `ast.overlap_lines`
+| `5`
+| Line overlap between chunks (for AST mode).
+|===
+
+==== Chunking Strategy Details
+
+* `by_size`: Simple character-count-based splitting. Fast, language-agnostic.
+* `by_lines`: Line-count-based splitting. Useful for uniform line-based analysis.
+* `ast` (default): Tree-sitter AST-aware splitting. Preserves function/class boundaries. Falls back to line-based chunking for unsupported languages.
+
+Supported AST languages: Python, Go, TypeScript, TSX, YAML, HCL.
+
+=== API
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `host`
+| `0.0.0.0`
+| Host to bind the REST API.
+
+| `port`
+| `8001`
+| Port for the REST API.
+
+| `cors_origins`
+| `["*"]`
+| Allowed CORS origins.
+|===
+
+=== State
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `directory`
+| `.hivemind/state`
+| Directory for state files and logs (inside the `.hivemind` project directory).
+|===
+
+The state directory contains:
+
+* `state.yaml` — YAML file tracking indexed files with checksums and modification times.
+* `indexer.pid` — PID file for the running indexer process.
+* `server_spawned_indexer.pid` — PID file for indexers spawned by the MCP `start_indexing` tool.
+
+=== Security
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `secret_file`
+| `~/.hivemind/secrets.yaml`
+| Path to secrets file.
+
+| `api_key_header`
+| `X-API-Key`
+| Header name for REST API authentication.
+|===
+
+=== Logging
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `level`
+| `INFO`
+| Logging level. One of: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+
+| `file_path`
+| `null`
+| Optional file path for log output. If set, logs are written to both stderr (Rich) and the file.
+|===
+
+=== Preprocessor
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `enabled`
+| `true`
+| Enable file pre-processing.
+
+| `plugin_directories`
+| `[]`
+| Custom directories to scan for additional pre-processor plugins.
+|===
+
+=== Additional Top-Level Settings
+
+[cols="2,2,5"]
+|===
+| Key | Default | Description
+
+| `git_enabled`
+| `true`
+| Enable git integration (`.gitignore` filtering, commit metadata extraction).
+
+| `git_only_tracked`
+| `false`
+| Only index files that are tracked by git.
+
+| `indexer_workers`
+| `4`
+| Number of concurrent indexer worker threads.
+
+| `observability_metrics_enabled`
+| `true`
+| Enable the `/metrics` REST endpoint.
+
+| `workspace_path`
+| `$HIVEMIND_WORKSPACE_PATH` or `cwd()`
+| The workspace root path. Auto-detected from environment or current directory.
+|===
+
+== Example Configuration
+
+See link:../config.yaml.example[config.yaml.example] for a complete example.
+
+[source,yaml]
+----
+# .hivemind/config.yaml
+qdrant:
+  url: "http://localhost:6333"
+  collection_name: "my_project"
+
+model:
+  api_url: "http://localhost:1234/v1"
+  model_name: "qwen3-4B-embedding"
+  embedding_dim: 2500
+
+chunking:
+  strategy: "ast"
+  language_aware: true
+
+scout:
+  urls:
+    - "https://docs.example.com"
+  recursive: true
+  max_pages_per_domain: 100
+
+logging:
+  level: "INFO"
+  file_path: ".hivemind/hivemind.log"
+
+git_enabled: true
+git_only_tracked: false
+indexer_workers: 4
+----

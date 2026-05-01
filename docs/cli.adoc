@@ -1,0 +1,239 @@
+= CLI Command Reference
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+Hivemind provides a unified CLI via `main.py`. The entry point is registered as the `hivemind` console script in link:../pyproject.toml[pyproject.toml].
+
+The CLI is built with `typer` and organised into subcommand groups. Each group is registered in link:../main.py[main.py, 40-53].
+
+== Global Options
+
+* `--help`: Show available commands and options.
+* `--install-completion`: Install shell completion for bash, zsh, fish, or powershell.
+* `--show-completion`: Show shell completion script.
+
+== Commands
+
+=== `hivemind init`
+
+Initialize a Hivemind project configuration for the current directory.
+
+Implementation: link:../cli/project_commands.py[cli/project_commands.py, 14-68]
+
+This command:
+
+. Creates the `.hivemind/` directory.
+. Loads the global config from `~/.hivemind/config.yaml` (if it exists).
+. Sets the Qdrant collection name to the current directory name.
+. Configures logging to `.hivemind/hivemind.log`.
+. Sets the scout output directory to `.hivemind/scout`.
+. Adds `.hivemind/` to `.gitignore` (if not already present).
+
+=== `hivemind setup`
+
+Run the interactive setup wizard to configure Hivemind globally.
+
+Implementation: link:../cli/setup.py[cli/setup.py]
+
+The wizard guides you through:
+
+. **Qdrant Setup**: Option to start a local Qdrant Docker container (`hivemind-qdrant`) or provide a remote URL.
+. **Embedding Model**: API URL, model name, embedding dimensions, and optional API key.
+. **LLM Chat**: API URL and model name for blueprint generation.
+. **Web Scout Defaults**: Recursive crawling and max pages per domain.
+
+Configuration is saved to `~/.hivemind/config.yaml`.
+
+=== `hivemind indexer start <path>`
+
+Start the code ingestion process.
+
+Implementation: link:../cli/indexer_commands.py[cli/indexer_commands.py, 19-75], link:../indexer/watcher.py[indexer/watcher.py]
+
+==== Arguments
+
+* `<path>`: The directory to index.
+
+==== Options
+
+* `--watch / --no-watch`: Enable/disable file system watching (default: watch).
+* `--verbose`: Show detailed indexing logs.
+* `--detach`, `-d`: Run in background (re-spawns as a detached subprocess).
+
+==== Behaviour
+
+. Calls `init_collection()` to ensure the Qdrant collection exists (with dimension validation).
+. Creates an `Indexer` instance with a bounded task queue (`maxsize = workers * 100`).
+. Starts `IndexWorker` threads (configurable via `indexer_workers`, default: 4).
+. Performs an initial scan of the directory, displaying progress via Rich.
+. If `--watch` is enabled, starts a `watchdog` observer to monitor file changes.
+. Supports graceful shutdown via `SIGTERM` or `Ctrl+C`.
+. In detached mode, logs are written to the configured log file (default: `.hivemind/hivemind.log`).
+
+==== Detach Mode
+
+When `--detach` is used, the indexer re-spawns itself as a background process:
+
+[source,python]
+----
+cmd = [sys.executable] + sys.argv
+# Remove --detach flags
+cmd.remove("--detach")
+p = subprocess.Popen(cmd, stdout=f, stderr=f, start_new_session=True, cwd=os.getcwd())
+----
+
+The PID is written to `{state_dir}/indexer.pid`.
+
+=== `hivemind indexer stop`
+
+Stop the background indexer process.
+
+Implementation: link:../cli/indexer_commands.py[cli/indexer_commands.py, 77-104]
+
+Reads the PID from `{state_dir}/indexer.pid` and sends `SIGTERM`. Waits up to 2.5 seconds for the PID file to be cleaned up.
+
+=== `hivemind indexer clean` (alias: `clear`)
+
+Wipes the local state AND the Qdrant collection for the current project.
+
+Implementation: link:../cli/indexer_commands.py[cli/indexer_commands.py, 106-153]
+
+==== Options
+
+* `--force`, `-f`: Skip confirmation prompt.
+
+==== Actions
+
+. Deletes the Qdrant collection (gracefully handles "not found" errors).
+. Removes the state directory (`{state_dir}`).
+. Creates an empty state directory.
+
+=== `hivemind scout crawl [urls...]`
+
+Crawl web documentation and save it for indexing.
+
+Implementation: link:../cli/scout_commands.py[cli/scout_commands.py], link:../scout/manager.py[scout/manager.py]
+
+==== Arguments
+
+* `[urls...]`: Optional list of specific URLs to crawl. If omitted, uses URLs from config.
+
+==== Options
+
+* `--recursive`, `-r`: Enable recursive crawling (follows internal links).
+* `--max-pages`, `-m <int>`: Max pages to crawl (overrides config).
+* `--output-dir`, `-o <path>`: Root directory for saved markdown files.
+* `--stay-in-path`: Only follow URLs that start with the seed URL path.
+* `--skip-existing / --no-skip`: Skip URLs that have already been crawled (default: skip).
+* `--include`, `-i <pattern>`: Only crawl URLs matching these glob patterns (can be used multiple times).
+* `--concurrency`, `-c <int>`: Max parallel requests.
+* `--headful`: Run browser with window visible (default: headless).
+* `--delay <float>`: Base delay between requests in seconds.
+* `--verbose`: Show detailed crawling logs.
+
+==== URL Range Expansion
+
+URLs containing range placeholders like `{1..100}` are expanded automatically:
+
+[source,python]
+----
+# {1..5} expands to 1, 2, 3, 4, 5
+"https://docs.example.com/page/{1..5}"
+----
+
+==== Output Structure
+
+Crawled pages are saved as Markdown files with YAML frontmatter:
+
+[source,yaml]
+----
+---
+source_url: https://docs.example.com/page
+seed_url: https://docs.example.com
+---
+...content...
+----
+
+Files are organised by domain and path:
+
+[source]
+----
+.hivemind/scout/
+  docs_example_com/
+    page.md
+    sub/
+      page.md
+----
+
+=== `hivemind search <query>`
+
+Perform a semantic search from the terminal.
+
+Implementation: link:../cli/search_command.py[cli/search_command.py]
+
+==== Arguments
+
+* `<query>`: The natural language search query.
+
+==== Options
+
+* `--limit <int>`: Number of results to return (default: 5).
+* `--verbose`: Show detailed metadata (scores, symbols, git info, path breadcrumbs).
+* `--format`, `-f <text>`: Output format (`text` or `json`).
+
+==== Output
+
+In `text` mode, results are displayed as Rich panels with syntax highlighting, line numbers, and metadata.
+
+In `json` mode, results are output as raw JSON for programmatic consumption.
+
+=== `hivemind web-search <query>`
+
+Search the web and display results in the terminal.
+
+Implementation: link:../cli/web_search_command.py[cli/web_search_command.py]
+
+==== Arguments
+
+* `<query>`: The web search query string.
+
+==== Options
+
+* `--max-results`, `-n <int>`: Maximum number of results to return (default: 10, max: 20).
+* `--backend`, `-b <text>`: Search backend override (`duckduckgo`, `brave`, `searxng`).
+* `--verbose`, `-v`: Enable detailed logging.
+
+=== `hivemind mcp`
+
+Start the MCP (Model Context Protocol) server.
+
+Implementation: link:../cli/server_commands.py[cli/server_commands.py, 8-12], link:../server/server.py[server/server.py]
+
+* Uses `stdio` for communication.
+* Exposes all MCP tools defined in `server/server.py`.
+* Logs to `stderr` (to avoid interfering with `stdio` protocol).
+
+=== `hivemind api`
+
+Start the FastAPI REST server.
+
+Implementation: link:../cli/server_commands.py[cli/server_commands.py, 14-28], link:../server/api.py[server/api.py]
+
+==== Options
+
+* `--host <text>`: Bind host (overrides config, default: `0.0.0.0`).
+* `--port <int>`: Bind port (overrides config, default: `8001`).
+* `--verbose`: Enable debug logging for API requests.
+
+== Architecture Notes
+
+The CLI is structured as a plugin system: each subcommand group is defined in its own module under `cli/` and registered via a `register()` function. This keeps the main entry point clean and makes it easy to add new command groups.
+
+[source,python]
+----
+# main.py
+from cli.indexer_commands import register as register_indexer
+register_indexer(app)
+----

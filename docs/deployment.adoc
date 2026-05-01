@@ -1,0 +1,194 @@
+= Deployment Guide
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+Hivemind can be deployed as a background service on Linux (`systemd`) or macOS (`launchd`), managed via PM2, or run in Docker.
+
+== Systemd (Linux)
+
+Create a service file at `/etc/systemd/system/hivemind-indexer.service`:
+
+[source,ini]
+----
+[Unit]
+Description=Hivemind Code Indexer
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/path/to/hivemind
+ExecStart=/usr/local/bin/uv run python main.py indexer start /path/to/your/codebase
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+----
+
+Enable and start:
+
+[source,bash]
+----
+sudo systemctl enable hivemind-indexer
+sudo systemctl start hivemind-indexer
+----
+
+=== API Service (Optional)
+
+If you also want the REST API running as a service:
+
+[source,ini]
+----
+[Unit]
+Description=Hivemind REST API
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/path/to/hivemind
+ExecStart=/usr/local/bin/uv run python main.py api
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+----
+
+== PM2 (Node.js Process Manager)
+
+If you prefer PM2 for process management:
+
+[source,bash]
+----
+# Start the indexer
+pm2 start "uv run python main.py indexer start /path/to/code" --name hivemind-indexer
+
+# Start the REST API
+pm2 start "uv run python main.py api" --name hivemind-api
+
+# Save the PM2 process list
+pm2 save
+
+# Configure PM2 to start on boot
+pm2 startup
+----
+
+== Docker
+
+=== Qdrant (Required)
+
+The vector database (Qdrant) is designed to run in Docker. See link:../infra/compose.yml[infra/compose.yml]:
+
+[source,yaml]
+----
+version: '3.8'
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: hivemind-qdrant
+    ports:
+      - "6333:6333"   # gRPC
+      - "6334:6334"   # HTTP
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+----
+
+Start it with:
+
+[source,bash]
+----
+docker compose -f infra/compose.yml up -d
+----
+
+=== Full Stack (Custom Dockerfile)
+
+To run the entire Hivemind stack in Docker, create a custom `Dockerfile`:
+
+[source,dockerfile]
+----
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Install dependencies
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+# Copy application
+COPY . .
+
+# Expose API port
+EXPOSE 8001
+
+# Default: start the indexer
+CMD ["uv", "run", "python", "main.py", "indexer", "start", "/code"]
+----
+
+== Installation Profiles
+
+Hivemind offers two installation profiles:
+
+[cols="2,3,4"]
+|===
+| Profile | Includes | Use Case
+
+| **Standard** (default)
+| Core + Web Search (`ddgs`)
+| Code indexing, semantic search & web search
+
+| **Extended**
+| Standard + Web Scout (`crawl4ai`, `playwright`)
+| Also crawling & scraping full web pages
+|===
+
+The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB).
+
+=== Installation Scripts
+
+[source,bash]
+----
+# Interactive setup (recommended for first-time users)
+./setup.sh          # Standard
+./setup.sh --extended  # Extended
+
+# Simple installer (no wizard)
+./install.sh          # Standard
+./install.sh --extended  # Extended
+----
+
+== Environment Variables
+
+Key environment variables for deployment:
+
+[source,bash]
+----
+# Qdrant connection
+export HIVEMIND_QDRANT__URL="http://qdrant:6333"
+
+# Embedding model
+export HIVEMIND_MODEL__API_URL="http://embedding-server:1234/v1"
+export HIVEMIND_MODEL__MODEL_NAME="qwen3-4B-embedding"
+
+# API server
+export HIVEMIND_API__HOST="0.0.0.0"
+export HIVEMIND_API__PORT=8001
+
+# Logging
+export HIVEMIND_LOGGING__LEVEL="INFO"
+export HIVEMIND_LOGGING__FILE_PATH="/var/log/hivemind/hivemind.log"
+
+# Workspace
+export HIVEMIND_WORKSPACE_PATH="/path/to/codebase"
+----
+
+== Security Considerations
+
+* The REST API authentication is minimal by default. In production, configure `security.api_key_header` and validate against `secrets.yaml`.
+* The MCP server communicates over `stdio` and is designed for local use only. Do not expose it over a network.
+* Hivemind is not hardened against prompt injection (see the Security Disclaimer in the README).

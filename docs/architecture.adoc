@@ -1,0 +1,245 @@
+= Hivemind Architecture
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: pygments
+
+== Overview
+
+Hivemind is a modular, distributed system designed to bridge the gap between local codebases and large-scale semantic search. It provides a pipeline for indexing code and web documentation, storing vector embeddings in Qdrant, and exposing search capabilities via MCP (Model Context Protocol) and REST.
+
+The system is divided into five main layers, adhering to the strict component boundaries defined in link:../AGENTS.md[AGENTS.md]:
+
+. *Core (Shared)* — Configuration loading, external API clients (Qdrant, Embedding API), shared utilities.
+. *Indexer (Ingestion)* — File scanning, watching, chunking, and embedding.
+. *Server (Interfaces)* — MCP tool definitions and REST API endpoints.
+. *Scout (Web Crawling)* — Web page crawling, chunking, and caching for the Map-Reduce pattern.
+. *Infra (Infrastructure)* — Deployment artifacts (Docker Compose).
+
+== Component Architecture
+
+=== Core (`core/`)
+
+The core layer is the only place where external API clients are instantiated. Both the Indexer and Server import clients from here.
+
+* `core/config.py` — Pydantic-based settings with YAML file + environment variable support.
+* `core/clients.py` — Lazy-initialised, thread-safe singletons for QdrantClient and OpenAI (embedding + chat).
+* `core/search.py` — Pluggable web search backends (DuckDuckGo, Brave, SearXNG).
+* `core/complexity.py` — AST-based complexity analysis using tree-sitter.
+* `core/planner.py` — Blueprint generation via flagship LLM for coding tasks.
+* `core/filesystem.py` — Safe filesystem traversal and file reading utilities.
+* `core/language_support.py` — Shared tree-sitter language definitions and lazy Language object creation.
+
+[source,python]
+----
+# Example: Lazy client initialisation in core/clients.py
+def get_db() -> QdrantClient:
+    """Return a lazily-initialised QdrantClient singleton (thread-safe)."""
+    global _db
+    if _db is None:
+        with _clients_lock:
+            if _db is None:
+                from .config import settings
+                _db = QdrantClient(
+                    url=settings.qdrant.url,
+                    api_key=settings.qdrant.api_key.get_secret_value()
+                    if settings.qdrant.api_key else None,
+                )
+    return _db
+----
+
+=== Indexer (`indexer/`)
+
+The indexer handles file discovery, reading, chunking, and ingestion into Qdrant.
+
+* `indexer/watcher.py` — `Indexer` class with file scanning, watchdog-based file watching, and worker coordination via a bounded queue.
+* `indexer/index_worker.py` — `IndexWorker` thread that reads, chunks, embeds, and upserts individual files.
+* `indexer/state.py` — `StateManager` that tracks file checksums and modification times for incremental indexing.
+* `indexer/git_utils.py` — `GitManager` for `.gitignore`-aware file filtering and commit metadata extraction.
+* `indexer/code_handler.py` — `CodeHandler` (watchdog event handler) and `EXTENSION_TO_LANG` mapping.
+* `indexer/chunkers/` — Pluggable chunking strategies:
+  ** `base.py` — Abstract `ChunkingStrategy` and `Chunk` dataclass.
+  ** `by_size.py` — Character-size-based chunking with overlap.
+  ** `by_lines.py` — Line-count-based chunking with overlap.
+  ** `ast.py` — AST-aware chunking using tree-sitter (Python, Go, TypeScript, YAML, HCL).
+  ** `markdown.py` — Header-aware Markdown chunking.
+* `indexer/preprocessors/` — Pluggable file pre-processors:
+  ** `base.py` — Abstract `BasePreprocessor`.
+  ** `text.py` — Default text file reader (`.py`, `.go`, `.js`, `.ts`, `.md`, etc.).
+  ** `pdf.py` — PDF extraction via `pypdf` with structured Markdown output.
+  ** `docx.py` — Placeholder for Word document extraction.
+
+==== Indexing Flow
+
+. The `Indexer` detects a file change (via initial scan or watchdog `CodeHandler`).
+. The file path is placed on a bounded `task_queue` (provides natural backpressure).
+. An `IndexWorker` picks up the file:
+.. Runs the file through the `PreprocessorManager` to extract text.
+.. Selects the appropriate `ChunkingStrategy` (AST, by_size, by_lines, or Markdown).
+.. Batches chunk texts and sends them to the embedding API via `get_embeddings_batch()`.
+.. Constructs Qdrant points with flat, filterable metadata (filepath, language, path segments, git info, symbols).
+.. Upserts points to Qdrant.
+.. Updates the `StateManager` with the file's checksum and modification time.
+. After the initial scan, the `StateManager` writes indexing metadata to Qdrant.
+
+[source,python]
+----
+# Worker indexing pipeline (simplified from index_worker.py)
+def index_file(self, filepath: Path):
+    content = self.preprocessor_manager.preprocess(filepath)
+    chunks = self.chunker.chunk(content, str(filepath))
+    vectors = get_embeddings_batch([c.content for c in chunks])
+    points = [build_point(chunk, vector) for chunk, vector in zip(chunks, vectors)]
+    get_db().upsert(collection_name=settings.qdrant.collection_name, points=points)
+    self.state_manager.update_file_state(filepath, len(chunks))
+----
+
+=== Server (`server/`)
+
+The server layer exposes Hivemind's capabilities to AI agents and external systems.
+
+* `server/server.py` — MCP server using `FastMCP`. Exposes tools:
+  ** `semantic_code_search` — Primary code discovery via vector search.
+  ** `get_file_tree` — Directory tree overview.
+  ** `get_index_status` / `start_indexing` — Index lifecycle management.
+  ** `analyze_code_complexity` — AST-based complexity scoring.
+  ** `generate_blueprint` — LLM-powered code change planning.
+  ** `run_verification` — Test/lint execution.
+  ** `search_web` — DuckDuckGo web search.
+  ** `scout_urls` — Web page crawling with Map-Reduce support.
+  ** `deep_research` — Combined search + crawl.
+  ** `read_file` — Safe file reading with line slicing.
+  ** `get_git_history` — Git commit metadata retrieval.
+* `server/api.py` — FastAPI REST server with `/health`, `/embed`, `/search`, `/metrics` endpoints.
+
+==== MCP Tool Architecture
+
+All MCP tools in `server/server.py` follow a consistent pattern:
+
+. Accept typed parameters (Pydantic-style via FastMCP).
+. Delegate to core modules for business logic.
+. Return clean, formatted Markdown strings.
+. Handle errors gracefully with user-friendly messages.
+
+[source,python]
+----
+@mcp.tool()
+def semantic_code_search(query: str, limit: int = 5, ...) -> str:
+    query_vector = get_embedding(query)
+    response = get_db().query_points(...)
+    return format_results(response)
+----
+
+=== Scout (`scout/`)
+
+The scout module handles web crawling and content management for the Map-Reduce pattern.
+
+* `scout/crawler.py` — `ScoutCrawler` wrapping `crawl4ai` with batch and recursive crawling, rate limiting, and content filtering.
+* `scout/manager.py` — `ScoutManager` for orchestrating crawls, URL-to-path conversion, and saving results.
+* `scout/chunk_cache.py` — `ChunkCache` (thread-safe, TTL-based in-memory cache) for the Map-Reduce pattern.
+* `scout/chunk_formatter.py` — `format_toc()` and `format_sections()` for TOC and section-based content retrieval.
+
+==== Map-Reduce Pattern
+
+The scout module implements a Map-Reduce pattern for large web pages:
+
+. **Map**: Crawl the URL, chunk the content via `MarkdownChunker`, cache chunks in memory.
+. **Reduce (TOC)**: Return a Table of Contents with section names, heading levels, line ranges, and estimated token counts.
+. **Reduce (Sections)**: Return only the requested sections from the cache.
+
+This avoids context-window overflow from giant documentation pages or GitHub PRs.
+
+=== Infra (`infra/`)
+
+Contains deployment artifacts:
+
+* `infra/compose.yml` — Docker Compose configuration for Qdrant.
+
+== Data Flow
+
+=== Indexing Flow
+
+[plantuml]
+....
+actor "File System" as FS
+participant Indexer
+participant Worker
+participant Preprocessor
+participant Chunker
+participant Embedder
+participant Qdrant
+participant StateManager
+
+FS -> Indexer: File created/modified
+Indexer -> Worker: Enqueue file path
+Worker -> Preprocessor: Extract text
+Preprocessor --> Worker: Text content
+Worker -> Chunker: Split into chunks
+Chunker --> Worker: List of Chunks
+Worker -> Embedder: Batch embed texts
+Embedder --> Worker: List of vectors
+Worker -> Qdrant: Upsert points (vector + metadata)
+Worker -> StateManager: Update file state
+StateManager --> Worker: OK
+....
+
+=== Search Flow
+
+[plantuml]
+....
+actor "User/LLM" as User
+participant Server
+participant Embedder
+participant Qdrant
+
+User -> Server: Search query
+Server -> Embedder: Embed query
+Embedder --> Server: Query vector
+Server -> Qdrant: Vector similarity search
+Qdrant --> Server: Ranked results
+Server -> User: Formatted results (Markdown/JSON)
+....
+
+== Configuration Precedence
+
+Settings are loaded in the following order (later overrides earlier):
+
+. Defaults defined in `core/config.py`.
+. YAML files: `.hivemind/config.yaml` → `config.yaml`.
+. Environment variables prefixed with `HIVEMIND_` (nested keys use `__` separator).
+
+See link:configuration.adoc[Configuration Reference] for the full schema.
+
+== Key Design Decisions
+
+=== Why Not LangChain / LlamaIndex?
+
+Hivemind deliberately avoids heavy frameworks. Raw API clients (`openai`, `qdrant-client`) provide:
+
+* Strict control over metadata payload construction.
+* Full visibility into performance (no framework overhead).
+* Easier debugging (no abstraction layers to trace through).
+* Smaller dependency footprint.
+
+=== Why Lazy Client Initialisation?
+
+Clients in `core/clients.py` are created on first access rather than at import time. This:
+
+* Allows tests to inject mocks via `patch()` before any client is created.
+* Avoids connection setup during module imports.
+* Is thread-safe via a double-checked locking pattern.
+
+=== Why a Bounded Queue?
+
+The `Indexer` uses a bounded `queue.Queue(maxsize=workers * 100)` for task distribution. This provides:
+
+* **Natural backpressure**: When the queue is full, the file scanner blocks, preventing unbounded memory growth during large initial scans.
+* **Clean shutdown**: Sending `None` sentinels signals workers to exit.
+
+=== Why Path Segment Indexes?
+
+Qdrant payload indexes are created for path segments 0–4 to enable hierarchical filtering by directory structure. This allows queries like "find code only in the `server/` directory" without full-text scanning.
+
+== Version
+
+Current version: `0.1.4` (see link:../pyproject.toml[pyproject.toml]).
