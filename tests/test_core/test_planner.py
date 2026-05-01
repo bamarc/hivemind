@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.planner import generate_blueprint
+from core.planner import generate_blueprint, BlueprintError
 
 
 class TestGenerateBlueprint:
@@ -33,7 +33,11 @@ class TestGenerateBlueprint:
                 choices=[
                     MagicMock(
                         message=MagicMock(
-                            content='{"blueprint": [{"file": "a.py", "action": "modify", "description": "x", "logic": "y"}]}',
+                            content=(
+                                '{"blueprint": [{"file": "a.py", '
+                                '"action": "modify", "description": "x", '
+                                '"logic": "y"}]}'
+                            ),
                             refusal=None,
                         )
                     )
@@ -52,7 +56,10 @@ class TestGenerateBlueprint:
                 choices=[
                     MagicMock(
                         message=MagicMock(
-                            content='{"file": "a.py", "action": "create", "description": "x", "logic": "y"}',
+                            content=(
+                                '{"file": "a.py", "action": "create", '
+                                '"description": "x", "logic": "y"}'
+                            ),
                             refusal=None,
                         )
                     )
@@ -63,12 +70,10 @@ class TestGenerateBlueprint:
         assert isinstance(result, list)
         assert result[0]["file"] == "a.py"
 
-    def test_error_handling(self, mock_chat_client: MagicMock):
-        """When the LLM call fails, an error dict should be returned in a
-        list."""
+    def test_raises_on_llm_failure(self, mock_chat_client: MagicMock):
+        """When the LLM call fails, :class:`BlueprintError` should be raised."""
         def failing_chat(*args, **kwargs):
             raise RuntimeError("LLM down")
         mock_chat_client.chat.completions.create = failing_chat
-        result = generate_blueprint("task", "context")
-        assert isinstance(result, list)
-        assert "error" in result[0]
+        with pytest.raises(BlueprintError, match="LLM down"):
+            generate_blueprint("task", "context")

@@ -286,15 +286,11 @@ class TestFallbackAndEdgeCases:
         for i, c in enumerate(chunks):
             assert c.chunk_index == i
 
-    @pytest.mark.xfail(
-        reason="Known bug: bytes(content, 'utf8') crashes on lone surrogates "
-               "(indexer/chunkers/ast.py:88).  Should use "
-               "errors='surrogateescape' or handle the encoding error "
-               "gracefully."
-    )
     def test_no_crash_on_binary_content(self, chunker: ASTChunker):
         """The chunker should not crash on content with lone surrogate
         characters (a known bug)."""
         content = "def foo():\n    pass\n# \ud800\n"
         chunks = chunker.chunk(content, "/broken.py")
         assert isinstance(chunks, list)
+        assert len(chunks) >= 1
+        assert "foo" in chunks[0].content

@@ -151,8 +151,8 @@ class TestIndexWorker:
     infinite loop and threading complexity.
     """
 
-    @patch("indexer.watcher.PreprocessorManager")
-    @patch("indexer.watcher.get_embeddings_batch")
+    @patch("indexer.preprocessors.manager.PreprocessorManager")
+    @patch("core.clients.get_embeddings_batch")
     def test_index_file_full_pipeline(
         self,
         mock_get_emb: MagicMock,
@@ -191,13 +191,13 @@ class TestIndexWorker:
         worker.chunker.chunk.assert_called_once()
         # 4. embeddings were fetched
         mock_get_emb.assert_called_once()
-        # 5. db.upsert was called (db is the global mock from conftest)
-        from indexer.watcher import db as mock_db
-        mock_db.upsert.assert_called_once()
+        # 5. db.upsert was called (get_db returns the global mock from conftest)
+        from indexer.watcher import get_db
+        get_db().upsert.assert_called_once()
         # 6. state was updated
         mock_state_manager.update_file_state.assert_called_once_with(test_file, 1)
 
-    @patch("indexer.watcher.PreprocessorManager")
+    @patch("indexer.preprocessors.manager.PreprocessorManager")
     def test_index_file_skips_unchanged(
         self,
         mock_preproc_cls: MagicMock,
@@ -223,8 +223,8 @@ class TestIndexWorker:
         # State should NOT be updated
         mock_state_manager.update_file_state.assert_not_called()
 
-    @patch("indexer.watcher.PreprocessorManager")
-    @patch("indexer.watcher.get_embeddings_batch")
+    @patch("indexer.preprocessors.manager.PreprocessorManager")
+    @patch("core.clients.get_embeddings_batch")
     def test_index_file_uses_markdown_chunker_for_md(
         self,
         mock_get_emb: MagicMock,
@@ -253,7 +253,7 @@ class TestIndexWorker:
         worker.markdown_chunker.chunk.assert_called_once()
         mock_get_emb.assert_called_once()
 
-    @patch("indexer.watcher.PreprocessorManager")
+    @patch("indexer.preprocessors.manager.PreprocessorManager")
     def test_index_file_preprocess_failure(
         self,
         mock_preproc_cls: MagicMock,
@@ -272,7 +272,7 @@ class TestIndexWorker:
         worker.index_file(Path("/tmp/broken.py"))
         worker.chunker.chunk.assert_not_called()
 
-    @patch("indexer.watcher.PreprocessorManager")
+    @patch("indexer.preprocessors.manager.PreprocessorManager")
     def test_index_file_uses_git_metadata(
         self,
         mock_preproc_cls: MagicMock,
@@ -301,13 +301,13 @@ class TestIndexWorker:
         worker.chunker = MagicMock()
         worker.chunker.chunk.return_value = [mock_chunk]
 
-        with patch("indexer.watcher.get_embeddings_batch", return_value=[[0.1] * 2500]):
+        with patch("core.clients.get_embeddings_batch", return_value=[[0.1] * 2500]):
             worker.index_file(Path("/tmp/test.py"))
 
         # Verify the upsert payload includes git metadata
-        from indexer.watcher import db as mock_db
+        from indexer.watcher import get_db
 
-        call_args = mock_db.upsert.call_args
+        call_args = get_db().upsert.call_args
         points = call_args.kwargs["points"]
         assert "commit_hash" in points[0]["payload"]
         assert points[0]["payload"]["commit_hash"] == "abc123"
@@ -511,11 +511,11 @@ class TestIndexer:
             ("/project", [], ["main.py"]),
         ]
 
-        with patch("indexer.watcher.get_embeddings_batch", return_value=[[0.0] * 2500]):
+        with patch("core.clients.get_embeddings_batch", return_value=[[0.0] * 2500]):
             idx._scan_directory(Path("/project"))
 
-        from indexer.watcher import db as mock_db
+        from indexer.watcher import get_db
 
         # Should have upserted metadata at the end
         # The last upsert call should be the metadata point
-        assert mock_db.upsert.call_count >= 1
+        assert get_db().upsert.call_count >= 1

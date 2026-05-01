@@ -150,13 +150,14 @@ class TestEdgeCases:
         assert "error" in result
         assert "not found" in result["error"]
 
-    def test_non_utf8_file_returns_error(self, tmp_path: Path):
-        """A binary file that cannot be decoded as UTF-8 should return an error."""
+    def test_non_utf8_file_does_not_crash(self, tmp_path: Path):
+        """A binary file that cannot be decoded as UTF-8 should not crash
+        and should return metrics with replacement characters instead."""
         f = tmp_path / "binary.py"
         f.write_bytes(b"\x80\x81\x82\x83")  # invalid UTF-8
         result = get_complexity(str(f))
-        assert "error" in result
-        assert "Could not decode" in result["error"]
+        assert "error" not in result
+        assert result["line_count"] == 1  # decoded with replacements
 
     def test_empty_file_returns_zero_counts(self, empty_py: Path):
         """An empty file should parse successfully with zero counts."""

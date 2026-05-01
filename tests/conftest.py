@@ -1,12 +1,11 @@
 """
 Global test configuration and mock infrastructure for Hivemind.
 
-Because ``core.clients`` creates ``db``, ``embedder``, and ``chat_client``
-at **import time** (module-level globals), this conftest imports
-``core.clients`` and then immediately replaces those globals with
-:class:`unittest.mock.MagicMock` instances.  Any test module that
-accesses ``core.clients.db`` or uses functions from ``core.clients``
-will therefore use the mocked objects.
+``core.clients`` now uses lazy factory functions (``get_db()``,
+``get_embedder()``, ``get_chat_client()``) instead of module-level globals.
+This conftest uses :func:`unittest.mock.patch` to inject ``MagicMock``
+instances as the return values of those factories *before* any test module
+imports that use them.
 
 ``tests/conftest.py`` is loaded by pytest before any test collection
 happens, so this patching is in place before any test module is
@@ -18,18 +17,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1.  Mock the module-level clients in ``core.clients``
+# 1.  Build the mock objects
 # ---------------------------------------------------------------------------
-# The import below triggers instantiation of QdrantClient, OpenAI (embedder)
-# and OpenAI (chat).  None of these constructors actually connect to anything
-# at __init__ time -- they just store configuration -- so it is safe even
-# with the LM server offline.
-import core.clients  # noqa: E402  (pytest re-ordering is intentional)
 
 # ── Qdrant client mock ────────────────────────────────────────────────
 MOCK_QDRANT: MagicMock = MagicMock(name="MockQdrantClient")
@@ -47,9 +41,6 @@ def _reset_qdrant():
     return_value, and call-history leakage from the previous test."""
     from core.config import settings
 
-    # reset_mock() clears call counts, call args, side_effect, return_value,
-    # and child mock cache -- then we explicitly re-bind the defaults so
-    # the next test starts with a clean slate.
     MOCK_QDRANT.reset_mock()
     MOCK_QDRANT.get_collections.side_effect = None
     MOCK_QDRANT.get_collections.return_value = MagicMock(
@@ -68,10 +59,17 @@ def _reset_qdrant():
     MOCK_QDRANT.delete_collection.side_effect = None
     MOCK_QDRANT.delete_collection.return_value = None
     MOCK_QDRANT.get_collection.side_effect = None
-    MOCK_QDRANT.get_collection.return_value = MagicMock(points_count=42)
+    MOCK_QDRANT.get_collection.return_value = MagicMock(
+        config=MagicMock(
+            params=MagicMock(
+                vectors=MagicMock(size=settings.model.embedding_dim),
+            ),
+        ),
+        points_count=42,
+    )
+
 
 _reset_qdrant()
-core.clients.db = MOCK_QDRANT
 
 # ── Embedder mock ─────────────────────────────────────────────────────
 MOCK_EMBEDDER: MagicMock = MagicMock(name="MockEmbedder")
@@ -102,8 +100,6 @@ def _fake_embedding_response(*, input, model, **_kwargs):
 
 MOCK_EMBEDDER.embeddings.create = _fake_embedding_response
 
-core.clients.embedder = MOCK_EMBEDDER
-
 # ── Chat client mock ──────────────────────────────────────────────────
 MOCK_CHAT_CLIENT: MagicMock = MagicMock(name="MockChatClient")
 
@@ -111,7 +107,10 @@ MOCK_CHAT_CLIENT: MagicMock = MagicMock(name="MockChatClient")
 def _fake_chat_completion(*, model, messages, **_kwargs):
     """Return a fake chat completion response."""
     choice_mock = MagicMock(name="ChatChoice")
-    choice_mock.message.content = '{"blueprint": [{"file": "test.py", "action": "modify", "description": "test", "logic": "pass"}]}'
+    choice_mock.message.content = (
+        '{"blueprint": [{"file": "test.py", "action": "modify", '
+        '"description": "test", "logic": "pass"}]}'
+    )
     choice_mock.message.refusal = None
 
     completion_mock = MagicMock(name="ChatCompletion")
@@ -121,11 +120,43 @@ def _fake_chat_completion(*, model, messages, **_kwargs):
 
 MOCK_CHAT_CLIENT.chat.completions.create = _fake_chat_completion
 
-core.clients.chat_client = MOCK_CHAT_CLIENT
+
+# ---------------------------------------------------------------------------
+# 2.  Apply patches so that every ``get_*()`` factory returns the mock
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True, scope="session")
+def _patch_clients():
+    """Patch the lazy client factories **once** for the entire test session.
+
+    This replaces the production ``get_db()`` / ``get_embedder()`` /
+    ``get_chat_client()`` with functions that always return the module-level
+    mock singletons defined above.
+
+    Some modules use ``from .clients import get_*`` (creating a local
+    reference), so we also patch those local references directly.
+    """
+    patchers = [
+        # Root factory patches
+        patch("core.clients.get_db", return_value=MOCK_QDRANT),
+        patch("core.clients.get_embedder", return_value=MOCK_EMBEDDER),
+        patch("core.clients.get_chat_client", return_value=MOCK_CHAT_CLIENT),
+        # Local references in modules that use ``from .clients import ...``
+        patch("core.planner.get_chat_client", return_value=MOCK_CHAT_CLIENT),
+        patch("server.server.get_db", return_value=MOCK_QDRANT),
+        patch("server.server.get_chat_client", return_value=MOCK_CHAT_CLIENT),
+        patch("server.api.get_db", return_value=MOCK_QDRANT),
+        patch("indexer.watcher.get_db", return_value=MOCK_QDRANT),
+        patch("indexer.index_worker.get_db", return_value=MOCK_QDRANT),
+    ]
+    for p in patchers:
+        p.start()
+    yield
+    for p in patchers:
+        p.stop()
 
 
 # ---------------------------------------------------------------------------
-# 2.  Deterministic embedding helper (for assertions in tests)
+# 3.  Deterministic embedding helper (for assertions in tests)
 # ---------------------------------------------------------------------------
 def fake_embedding_vector(index: int = 0) -> list[float]:
     """Return a deterministic embedding vector of the correct dimension.
@@ -141,30 +172,24 @@ def fake_embedding_vector(index: int = 0) -> list[float]:
 
 
 # ---------------------------------------------------------------------------
-# 3.  Auto‑reset between tests to prevent state leakage
+# 4.  Auto‑reset between tests to prevent state leakage
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _reset_module_mocks() -> Generator[None, None, None]:
     """Reset all module-level mocks to their default state before each test.
 
-    Because ``test_clients.py`` modifies ``mock_embedder.embeddings.create``
-    and other tests modify ``mock_qdrant.get_collections.side_effect``,
+    Because ``test_clients.py`` modifies ``MOCK_EMBEDDER.embeddings.create``
+    and other tests modify ``MOCK_QDRANT.get_collections.side_effect``,
     we must restore the defaults to prevent state leaking between tests.
     """
-    # ── Reset Qdrant mock ──
     _reset_qdrant()
-
-    # ── Reset Embedder mock ──
     MOCK_EMBEDDER.embeddings.create = _fake_embedding_response
-
-    # ── Reset Chat client mock ──
     MOCK_CHAT_CLIENT.chat.completions.create = _fake_chat_completion
-
     yield
 
 
 # ---------------------------------------------------------------------------
-# 4.  Shared fixtures
+# 5.  Shared fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def mock_qdrant() -> MagicMock:
