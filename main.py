@@ -41,12 +41,14 @@ def callback(ctx: typer.Context):
 from cli.indexer_commands import register as register_indexer
 from cli.scout_commands import register as register_scout
 from cli.search_command import register as register_search
+from cli.web_search_command import register as register_web_search
 from cli.server_commands import register as register_server
 from cli.project_commands import register as register_project
 
 register_indexer(app)
 register_scout(app)
 register_search(app)
+register_web_search(app)
 register_server(app)
 register_project(app)
 
