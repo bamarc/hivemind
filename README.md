@@ -17,7 +17,7 @@ Hivemind offers two installation profiles:
 
 | Profile | Includes | Use Case |
 |---------|----------|----------|
-| **Standard** (default) | Core + Web Search (`duckduckgo-search`) | Code indexing, semantic search & web search |
+| **Standard** (default) | Core + Web Search (`ddgs`) | Code indexing, semantic search & web search |
 | **Extended** | Standard + Web Scout (`crawl4ai`, `playwright`) | Also crawling & scraping full web pages |
 
 The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB). If you only need code indexing and web search, the standard install is sufficient.

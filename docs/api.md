@@ -72,7 +72,7 @@ Manage the semantic search index. Call `get_index_status` first; if not indexed,
   - `query` (required): The search query string (e.g., `"python asyncio gather documentation"`).
   - `max_results` (optional, default 10): Maximum results (capped at 20).
 
-- **Requires:** `duckduckgo-search` package. Install with `uv sync --extra scout`.
+- **Requires:** `ddgs` package. Install with `uv sync --extra scout`.
 
 ### `scout_urls`
 
