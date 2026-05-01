@@ -17,19 +17,19 @@ Hivemind offers two installation profiles:
 
 | Profile | Includes | Use Case |
 |---------|----------|----------|
-| **Simple** (default) | Core indexer, MCP server, search CLI | Code indexing & semantic search only |
-| **Extended** | Core + Web Scout (`crawl4ai`, `playwright`) | Also crawling web documentation |
+| **Standard** (default) | Core + Web Search (`duckduckgo-search`) | Code indexing, semantic search & web search |
+| **Extended** | Standard + Web Scout (`crawl4ai`, `playwright`) | Also crawling & scraping full web pages |
 
-The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB). If you only need code indexing and search, the simple install is sufficient.
+The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB). If you only need code indexing and web search, the standard install is sufficient.
 
 ### 1. The Interactive Setup (Recommended)
 If you are setting up Hivemind for the first time, use the interactive wizard. It will help you configure your models and even start a local Qdrant instance via Docker.
 
 ```bash
-# Simple install (core only)
+# Standard install (core + web search)
 ./setup.sh
 
-# Extended install (core + web scout)
+# Extended install (adds full web crawler)
 ./setup.sh --extended
 ```
 *Note: You can run this anytime later using `hivemind setup`.*
@@ -38,10 +38,10 @@ If you are setting up Hivemind for the first time, use the interactive wizard. I
 If you just want to install/update the `hivemind` tool globally without a wizard:
 
 ```bash
-# Simple install (core only)
+# Standard install (core + web search)
 ./install.sh
 
-# Extended install (core + web scout)
+# Extended install (adds full web crawler)
 ./install.sh --extended
 ```
 

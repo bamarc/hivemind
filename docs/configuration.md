@@ -50,6 +50,7 @@ Example: `HIVEMIND_QDRANT__URL="http://192.168.1.100:6333"`
 | `max_pages_per_domain` | `50` | Max pages to crawl per domain. |
 | `content_filter` | `true` | Enable noise removal from crawled pages. |
 | `exclude_patterns` | `[...]` | Glob patterns to exclude (e.g., login, pricing). |
+| `search_backend` | `duckduckgo` | Web search backend (`duckduckgo`, `brave`, `searxng`). |
 
 ### Chunking
 | Key | Default | Description |

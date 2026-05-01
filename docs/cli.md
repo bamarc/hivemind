@@ -36,6 +36,15 @@ Perform a semantic search from the terminal.
     *   `--limit <int>`: Number of results to return (default: 5).
     *   `--verbose`: Show vector similarity scores.
 
+### `web-search <query>`
+Search the web and display results in the terminal.
+*   **Arguments**:
+    *   `<query>`: The web search query string.
+*   **Options**:
+    *   `--max-results`, `-n <int>`: Maximum number of results to return (default: 10, max: 20).
+    *   `--backend`, `-b <text>`: Search backend override (duckduckgo, brave, searxng).
+    *   `--verbose`, `-v`: Enable detailed logging.
+
 ### `mcp`
 Start the MCP (Model Context Protocol) server.
 *   Uses `stdio` for communication.
