@@ -23,7 +23,8 @@
 			],
 			"alwaysAllow": [
 				"semantic_code_search",
-				"get_file_tree"
+				"get_file_tree",
+				"read_file"
 			]
 		}
 	}
