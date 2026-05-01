@@ -5,8 +5,9 @@ from mcp.server.fastmcp import FastMCP
 from core.clients import get_db, get_embedding, get_chat_client
 from core.config import settings
 from core.complexity import get_complexity
-from core.filesystem import get_file_tree as core_get_file_tree
+from core.filesystem import get_file_tree as core_get_file_tree, file_contents
 from core.planner import generate_blueprint as core_generate_blueprint, BlueprintError
+from core.search import search_web as core_search_web
 
 # Configure logging to stderr for MCP
 logging.basicConfig(
@@ -301,6 +302,198 @@ def run_verification(filepath: str = None) -> str:
         return "Error: Verification timed out after 60 seconds."
     except Exception as e:
         return f"Error running verification: {str(e)}"
+
+@mcp.tool()
+def search_web(query: str, max_results: int = 10) -> str:
+    """
+    Search the web using DuckDuckGo and return structured results.
+
+    Use this to find documentation, API references, or solutions for
+    programming questions. Returns title, URL, and snippet for each result.
+
+    To get full page content from a result URL, use the scout_urls tool.
+
+    Args:
+        query: The search query string (e.g., "python asyncio gather documentation").
+        max_results: Maximum number of results to return (default 10, max 20).
+    """
+    try:
+        results = core_search_web(query, max_results=max_results)
+
+        if not results:
+            return f"No web results found for: {query}"
+
+        lines = [f"# Web Search Results for: {query}\n"]
+        for i, r in enumerate(results, 1):
+            lines.append(f"## {i}. {r.title}")
+            lines.append(f"- **URL**: {r.url}")
+            lines.append(f"- **Snippet**: {r.snippet}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except ImportError as e:
+        return (
+            f"Error: {e}\n\n"
+            "The search_web tool requires the 'duckduckgo-search' package.\n"
+            "Install it with: `uv sync --extra scout`"
+        )
+    except Exception as e:
+        logger.error(f"Error in search_web: {e}")
+        return f"Error searching the web: {str(e)}"
+
+
+@mcp.tool()
+def scout_urls(urls: list[str], max_results: int = 3) -> str:
+    """
+    Crawl one or more URLs and return their content as markdown.
+
+    Use this after search_web to get full page content from result URLs.
+    Multiple URLs are crawled in parallel and returned in a single response
+    to reduce token overhead.
+
+    Args:
+        urls: List of URLs to crawl (e.g., ["https://docs.python.org/3/library/asyncio.html"]).
+        max_results: Maximum number of URLs to crawl (default 3, max 10, safety limit).
+    """
+    try:
+        from scout.crawler import ScoutCrawler
+    except ImportError:
+        return (
+            "Error: Scout dependencies are not installed.\n\n"
+            "The scout_urls tool requires 'crawl4ai' and 'playwright'.\n"
+            "Install with: `uv sync --extra scout`\n"
+            "Then run: `playwright install chromium`"
+        )
+
+    if not urls:
+        return "Error: No URLs provided."
+
+    # Safety limit
+    max_results = max(1, min(max_results, 10))
+    urls = urls[:max_results]
+
+    try:
+        import asyncio
+
+        crawler = ScoutCrawler()
+        results: list[tuple[str, str]] = []
+
+        async def _crawl():
+            async for url, content in crawler.crawl_batch(urls):
+                results.append((url, content))
+
+        asyncio.run(_crawl())
+
+        if not results:
+            return "No content retrieved from any of the provided URLs."
+
+        lines = ["# Scouted Pages\n"]
+        for url, content in results:
+            lines.append(f"---")
+            lines.append(f"## Source: {url}\n")
+            # Truncate excessively long pages to avoid overwhelming the context
+            if len(content) > 8000:
+                content = content[:8000] + "\n\n... [TRUNCATED - page too large] ..."
+            lines.append(content)
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"Error in scout_urls: {e}")
+        return f"Error crawling URLs: {str(e)}"
+
+
+@mcp.tool()
+def read_file(filepath: str, start_line: int = 1, max_lines: int = 500) -> str:
+    """
+    Read the contents of a file with optional line range.
+
+    Use this to inspect file contents when semantic_code_search is
+    insufficient. Supports slicing with start_line and max_lines.
+
+    Args:
+        filepath: Path to the file to read (relative or absolute).
+        start_line: First line to read (1-based, default 1).
+        max_lines: Maximum number of lines to return (default 500, max 1000).
+    """
+    from pathlib import Path
+
+    path = Path(filepath)
+    if not path.is_absolute():
+        path = settings.workspace_path / path
+
+    # Safety: respect excluded directories
+    from core.filesystem import _is_excluded
+    for part in path.parts:
+        if _is_excluded(part):
+            return (
+                f"Error: Cannot read from excluded directory pattern: {part}\n"
+                f"Path: {path}"
+            )
+
+    content = file_contents(str(path))
+    if content is None:
+        return f"Error: Could not read file: {filepath}\n(File not found, not readable, or binary.)"
+
+    lines = content.split("\n")
+    total_lines = len(lines)
+
+    # Clamp parameters
+    start_line = max(1, start_line)
+    max_lines = max(1, min(max_lines, 1000))
+
+    end_line = min(start_line + max_lines - 1, total_lines)
+    selected = lines[start_line - 1 : end_line]
+
+    header = f"# {path.name} (lines {start_line}-{end_line} of {total_lines})\n"
+    numbered = []
+    for i, line in enumerate(selected, start=start_line):
+        numbered.append(f"{i:6d} | {line}")
+
+    return header + "```\n" + "\n".join(numbered) + "\n```"
+
+
+@mcp.tool()
+def get_git_history(filepath: str) -> str:
+    """
+    Get git commit history metadata for a file.
+
+    Returns the last commit's hash, author, email, date, and subject.
+    Use this to understand who last modified a file and why.
+
+    Args:
+        filepath: Path to the file (relative to workspace root).
+    """
+    from pathlib import Path
+    from indexer.git_utils import GitManager
+
+    root = settings.workspace_path
+    path = Path(filepath)
+    if not path.is_absolute():
+        path = root / path
+
+    if not path.exists():
+        return f"Error: File not found: {filepath}"
+
+    manager = GitManager(root)
+
+    if not manager.is_git_repo:
+        return f"Not a git repository: {root}"
+
+    metadata = manager.get_commit_metadata(path)
+    if not metadata:
+        return f"No git history found for: {filepath}\n(File may be untracked or has no commits.)"
+
+    return (
+        f"# Git History: {path.name}\n"
+        f"- **Commit**: `{metadata.get('commit_hash', 'N/A')}`\n"
+        f"- **Author**: {metadata.get('commit_author', 'N/A')} <{metadata.get('commit_email', 'N/A')}>\n"
+        f"- **Date**: {metadata.get('commit_date', 'N/A')}\n"
+        f"- **Subject**: {metadata.get('commit_subject', 'N/A')}\n"
+    )
+
 
 def run_mcp():
     """Entry point for MCP server."""
