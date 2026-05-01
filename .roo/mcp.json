@@ -1,0 +1,30 @@
+{
+	"mcpServers": {
+		"hivemind": {
+			"name": "Hivemind",
+			"description": "Semantic code search, file tree, complexity analysis, and blueprint planning for AI agents",
+			"command": "uv",
+			"args": [
+				"run",
+				"--directory",
+				"/home/marc/Entwicklung/hivemind",
+				"hivemind",
+				"mcp"
+			],
+			"env": {
+				"CONFIG_PATH": "/home/marc/Entwicklung/hivemind/config.yaml"
+			},
+			"disabled": false,
+			"autoApprove": [
+				"semantic_code_search",
+				"get_file_tree",
+				"analyze_code_complexity",
+				"generate_blueprint"
+			],
+			"alwaysAllow": [
+				"semantic_code_search",
+				"get_file_tree"
+			]
+		}
+	}
+}
