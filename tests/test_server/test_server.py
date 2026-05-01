@@ -251,6 +251,18 @@ class TestSearchWeb:
 class TestScoutUrls:
     """Tests for the ``scout_urls`` MCP tool."""
 
+    # A markdown document with multiple header sections for chunking tests.
+    _MULTI_SECTION_MD = (
+        "# Project Overview\n\n"
+        "Welcome to the project.\n\n"
+        "## Installation\n\n"
+        "Run `pip install foo`.\n\n"
+        "## Configuration\n\n"
+        "Set the API key.\n\n"
+        "## Usage\n\n"
+        "Run `foo --help`.\n"
+    )
+
     @pytest.fixture(autouse=True)
     def _mock_scout_crawler(self):
         """Mock ScoutCrawler to avoid real HTTP calls.
@@ -261,9 +273,9 @@ class TestScoutUrls:
         with patch("scout.crawler.ScoutCrawler") as mock_cls:
             mock_crawler = MagicMock()
 
-            async def fake_crawl_batch(urls):
+            async def fake_crawl_batch(urls, **_kw):
                 for u in urls:
-                    yield u, f"# Content from {u}\n\nSome markdown content."
+                    yield u, self._MULTI_SECTION_MD
 
             mock_crawler.crawl_batch = fake_crawl_batch
             mock_cls.return_value = mock_crawler
@@ -274,15 +286,13 @@ class TestScoutUrls:
         result = await scout_urls(["https://example.com"])
         assert "Scouted Pages" in result
         assert "https://example.com" in result
-        assert "Content from https://example.com" in result
+        assert "Project Overview" in result
 
     async def test_crawls_multiple_urls(self):
         """Multiple URLs should be crawled in a single call."""
         result = await scout_urls(["https://a.com", "https://b.com"])
         assert "https://a.com" in result
         assert "https://b.com" in result
-        assert "Content from https://a.com" in result
-        assert "Content from https://b.com" in result
 
     async def test_max_results_limit(self):
         """max_results should cap the number of URLs processed."""
@@ -306,6 +316,113 @@ class TestScoutUrls:
             result = await scout_urls(["https://example.com"])
         assert "Error" in result
         assert "crawl4ai" in result
+
+    # ================================================================
+    #  TOC mode
+    # ================================================================
+
+    async def test_toc_mode_returns_table_of_contents(self):
+        """``mode='toc'`` should return a Table of Contents with sections."""
+        result = await scout_urls(["https://example.com"], mode="toc")
+        assert "Table of Contents" in result
+        assert "Project Overview" in result
+        assert "Installation" in result
+        assert "Configuration" in result
+        assert "Usage" in result
+        # Should NOT include raw markdown content like "pip install"
+        assert "pip install" not in result
+
+    async def test_toc_mode_includes_token_estimates(self):
+        """TOC should show estimated token counts per section."""
+        result = await scout_urls(["https://example.com"], mode="toc")
+        assert "~" in result  # token estimate marker
+        assert "tokens" in result.lower()
+
+    async def test_toc_mode_includes_section_instructions(self):
+        """TOC should tell the agent how to use sections mode."""
+        result = await scout_urls(["https://example.com"], mode="toc")
+        assert "mode='sections'" in result
+
+    # ================================================================
+    #  Sections mode
+    # ================================================================
+
+    async def test_sections_mode_by_name(self):
+        """``mode='sections'`` should return content for matching sections."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=["Installation"],
+        )
+        assert "Selected Sections" in result
+        assert "pip install" in result  # content from Installation chunk
+        # Should NOT include other sections
+        assert "API key" not in result
+
+    async def test_sections_mode_by_index(self):
+        """Sections can be referenced by numeric index from the TOC."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=["2"],
+        )
+        assert "Configuration" in result or "API key" in result
+
+    async def test_sections_mode_multiple(self):
+        """Multiple section names can be requested at once."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=["Installation", "Usage"],
+        )
+        assert "pip install" in result
+        assert "foo --help" in result
+
+    async def test_sections_mode_case_insensitive(self):
+        """Section matching should be case-insensitive."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=["installation"],
+        )
+        assert "pip install" in result
+
+    async def test_sections_mode_no_match(self):
+        """Unmatched sections should show available options."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=["NonExistent"],
+        )
+        assert "No sections matched" in result
+        # Should list available sections
+        assert "Installation" in result
+
+    async def test_sections_mode_empty_list(self):
+        """Empty sections list should return a message."""
+        result = await scout_urls(
+            ["https://example.com"],
+            mode="sections",
+            sections=[],
+        )
+        assert "No sections requested" in result
+
+    # ================================================================
+    #  Full mode (backward compat)
+    # ================================================================
+
+    async def test_full_mode_default(self):
+        """Default mode='full' should return raw markdown content."""
+        result = await scout_urls(["https://example.com"])
+        assert "Scouted Pages" in result
+        assert "pip install" in result  # raw content present
+        assert "foo --help" in result
+
+    async def test_full_mode_explicit(self):
+        """Explicit ``mode='full'`` should behave the same as default."""
+        result = await scout_urls(["https://example.com"], mode="full")
+        assert "Scouted Pages" in result
+        assert "pip install" in result
 
 
 class TestReadFile:
