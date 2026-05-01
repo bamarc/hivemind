@@ -344,7 +344,7 @@ def search_web(query: str, max_results: int = 10) -> str:
 
 
 @mcp.tool()
-def scout_urls(urls: list[str], max_results: int = 3) -> str:
+async def scout_urls(urls: list[str], max_results: int = 3) -> str:
     """
     Crawl one or more URLs and return their content as markdown.
 
@@ -374,16 +374,11 @@ def scout_urls(urls: list[str], max_results: int = 3) -> str:
     urls = urls[:max_results]
 
     try:
-        import asyncio
-
         crawler = ScoutCrawler()
         results: list[tuple[str, str]] = []
 
-        async def _crawl():
-            async for url, content in crawler.crawl_batch(urls):
-                results.append((url, content))
-
-        asyncio.run(_crawl())
+        async for url, content in crawler.crawl_batch(urls):
+            results.append((url, content))
 
         if not results:
             return "No content retrieved from any of the provided URLs."

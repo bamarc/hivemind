@@ -269,41 +269,41 @@ class TestScoutUrls:
             mock_cls.return_value = mock_crawler
             yield mock_crawler
 
-    def test_crawls_single_url(self):
+    async def test_crawls_single_url(self):
         """A single URL should be crawled and returned."""
-        result = scout_urls(["https://example.com"])
+        result = await scout_urls(["https://example.com"])
         assert "Scouted Pages" in result
         assert "https://example.com" in result
         assert "Content from https://example.com" in result
 
-    def test_crawls_multiple_urls(self):
+    async def test_crawls_multiple_urls(self):
         """Multiple URLs should be crawled in a single call."""
-        result = scout_urls(["https://a.com", "https://b.com"])
+        result = await scout_urls(["https://a.com", "https://b.com"])
         assert "https://a.com" in result
         assert "https://b.com" in result
         assert "Content from https://a.com" in result
         assert "Content from https://b.com" in result
 
-    def test_max_results_limit(self):
+    async def test_max_results_limit(self):
         """max_results should cap the number of URLs processed."""
         urls = [f"https://example.com/{i}" for i in range(20)]
-        result = scout_urls(urls, max_results=2)
+        result = await scout_urls(urls, max_results=2)
         # Should only have 2 URLs worth of content, not 20
         assert result.count("Source:") == 2
 
-    def test_empty_urls_error(self):
+    async def test_empty_urls_error(self):
         """An empty URL list should return an error."""
-        result = scout_urls([])
+        result = await scout_urls([])
         assert "Error" in result
         assert "No URLs" in result
 
-    def test_import_error_handled(self):
+    async def test_import_error_handled(self):
         """When scout deps are missing, show a helpful message."""
         with patch(
             "scout.crawler.ScoutCrawler",
             side_effect=ImportError("No module named crawl4ai"),
         ):
-            result = scout_urls(["https://example.com"])
+            result = await scout_urls(["https://example.com"])
         assert "Error" in result
         assert "crawl4ai" in result
 
