@@ -118,7 +118,7 @@ search_filter = Filter(must=must_filters) if must_filters else None
 
 === `deep_research`
 
-**Combine web search + crawling into a single action.** Searches DuckDuckGo for the query, grabs the top URLs, crawls them concurrently, and returns the content as chunk-truncated markdown.
+**Combine web search + crawling into a single action.** Searches the web for the query, grabs the top URLs, crawls them concurrently, and returns the content as chunk-truncated markdown.
 
 Implementation: link:../server/server.py[server/server.py, 504-617]
 
@@ -142,6 +142,11 @@ Implementation: link:../server/server.py[server/server.py, 504-617]
 | No
 | `3`
 | Maximum number of URLs to crawl from results (capped at 5).
+
+| `categories`
+| No
+| —
+| Search categories filter (SearXNG backend only). E.g., `["it", "science"]`. Ignored by DuckDuckGo.
 |===
 
 ==== Requirements
@@ -288,7 +293,9 @@ Starts the indexing process by spawning `hivemind indexer start <path> --detach`
 
 === `search_web`
 
-**Search the internet using DuckDuckGo.** Returns title, URL, and snippet for each result.
+**Search the internet.** Returns title, URL, and snippet for each result.
+
+Supports multiple backends: DuckDuckGo (default), SearXNG (self-hosted), Brave (future).
 
 Implementation: link:../server/server.py[server/server.py, 306-343], link:../core/search.py[core/search.py]
 
@@ -307,15 +314,25 @@ Implementation: link:../server/server.py[server/server.py, 306-343], link:../cor
 | No
 | `10`
 | Maximum results (capped at 20).
+
+| `categories`
+| No
+| —
+| Search categories filter (SearXNG backend only). E.g., `["it", "science"]`.
 |===
 
 ==== Backend Support
 
-The search backend is configurable via `scout.search_backend`:
+The search backend is configurable via `scout.search_backend` config key:
 
 * `duckduckgo` — Zero-config, no API key required (default).
-* `brave` — Requires `brave_api_key` in config.
-* `searxng` — Requires `searxng_url` in config.
+* `searxng` — Self-hosted metasearch engine. Configure `searxng_url` in config.yaml.
+* `brave` — Requires `brave_api_key` in config (not yet implemented).
+
+When using `searxng`, the `categories` parameter lets you scope results to specific
+engines. Common categories: `general`, `science`, `it`, `news`, `files`, `images`,
+`videos`, `music`, `social media`, `map`. An empty list (or `None`) searches all
+categories.
 
 === `scout_urls`
 
