@@ -16,6 +16,27 @@ The CLI is built with `typer` and organised into subcommand groups. Each group i
 
 == Commands
 
+=== `hivemind features`
+
+Show which Hivemind features are installed and operational for MCP usage.
+
+Implementation: link:../cli/features_command.py[cli/features_command.py]
+
+This command displays a comprehensive diagnostic report with five sections:
+
+. **Configuration** — Current settings (Qdrant URL, collection name, embedding / chat API endpoints and models, search backend, git status, workspace path).
+. **Service Health** — Connection status for Qdrant, the embedding API endpoint, and the chat/LLM API endpoint (each is probed with a lightweight request).
+. **Optional Dependencies** — Whether optional feature groups (`scout`, `web`) are installed. Missing packages are flagged with the install command required.
+. **MCP Tools** — All 12 MCP tools registered on the server, annotated with their availability status (core tools are always listed as available; dependency-gated tools show a warning when their prerequisites are missing).
+. **Summary** — Quick one-line overview of all subsystems.
+
+No arguments or options are required.
+
+[source,console]
+----
+hivemind features
+----
+
 === `hivemind init`
 
 Initialize a Hivemind project configuration for the current directory.

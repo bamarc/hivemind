@@ -24,10 +24,13 @@ echo "📦 Installing hivemind tool..."
 if [ "$EXTENDED" = true ]; then
     echo "🌐 Extended install: including scout dependencies (crawl4ai, playwright)..."
     uv tool install --reinstall --force . --with duckduckgo-search --with crawl4ai --with playwright
+    # Also sync scout extras into the local venv so `uv run` commands work correctly
+    uv sync --extra scout --extra web
 else
     echo "🔧 Standard install: core + web search (duckduckgo-search)."
     echo "   To include the full web crawler, run: bash install.sh --extended"
     uv tool install --reinstall --force . --with duckduckgo-search
+    uv sync --extra web
 fi
 
 # 2. Install Playwright browsers if scout dependencies are present.
