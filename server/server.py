@@ -304,7 +304,11 @@ def run_verification(filepath: str = None) -> str:
         return f"Error running verification: {str(e)}"
 
 @mcp.tool()
-def search_web(query: str, max_results: int = 10) -> str:
+def search_web(
+    query: str,
+    max_results: int = 10,
+    categories: list[str] | None = None,
+) -> str:
     """
     Search the web using DuckDuckGo and return structured results.
 
@@ -316,9 +320,12 @@ def search_web(query: str, max_results: int = 10) -> str:
     Args:
         query: The search query string (e.g., "python asyncio gather documentation").
         max_results: Maximum number of results to return (default 10, max 20).
+        categories: Optional list of search categories (SearXNG backend only).
+            Common categories: general, science, it, news, files, images, videos,
+            music, social media, map. Ignored by DuckDuckGo backend.
     """
     try:
-        results = core_search_web(query, max_results=max_results)
+        results = core_search_web(query, max_results=max_results, categories=categories)
 
         if not results:
             return f"No web results found for: {query}"
@@ -506,6 +513,7 @@ async def deep_research(
     query: str,
     max_results: int = 3,
     max_urls: int = 3,
+    categories: list[str] | None = None,
 ) -> str:
     """
     Search the web, crawl the top results, and return chunk-truncated markdown.
@@ -521,10 +529,12 @@ async def deep_research(
         query: Natural language research query (e.g., "Python asyncio gather docs").
         max_results: Maximum number of search results to consider (default 3, max 10).
         max_urls: Maximum number of URLs to crawl from results (default 3, max 5).
+        categories: Optional list of search categories (SearXNG backend only).
+            Ignored by DuckDuckGo backend.
     """
     try:
         # Step 1: Search the web
-        search_results = core_search_web(query, max_results=max_results)
+        search_results = core_search_web(query, max_results=max_results, categories=categories)
 
         if not search_results:
             return f"No web results found for: {query}"
