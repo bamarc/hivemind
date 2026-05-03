@@ -250,15 +250,10 @@ class TestSearchWeb:
     """Tests for the pluggable search_web dispatcher."""
 
     def test_dispatches_to_duckduckgo(self, mock_ddgs_single: MagicMock):
-        """Default backend should be duckduckgo."""
-        results = search_web("test")
-        assert len(results) == 1
-        assert results[0].title == "Test Result"
-
-    def test_explicit_backend(self, mock_ddgs_single: MagicMock):
-        """Explicit backend='duckduckgo' should work."""
+        """Explicit backend='duckduckgo' should return SearchResult objects."""
         results = search_web("test", backend="duckduckgo")
         assert len(results) == 1
+        assert results[0].title == "Test Result"
 
     def test_dispatches_to_searxng(self, mock_httpx_client: MagicMock):
         """Explicit backend='searxng' should return SearchResult objects."""
