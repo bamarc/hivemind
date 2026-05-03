@@ -26,6 +26,7 @@ class ScoutSettings(BaseSettings):
     search_backend: Literal["duckduckgo", "brave", "searxng"] = "duckduckgo"
     brave_api_key: Optional[SecretStr] = None
     searxng_url: str = "http://localhost:8888"
+    searxng_categories: List[str] = []
 
 class QdrantSettings(BaseSettings):
     url: str = "http://localhost:6333"

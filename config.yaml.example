@@ -37,6 +37,13 @@ scout:
   recursive: false
   content_filter: true
   max_pages_per_domain: 50
+  # Search backend configuration (duckduckgo, brave, searxng)
+  search_backend: "duckduckgo"
+  # searxng_url: "http://localhost:8888"
+  # searxng_categories:
+  #   - general
+  #   - it
+  #   - science
 
 api:
   host: "0.0.0.0"

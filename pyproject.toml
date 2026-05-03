@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "ddgs>=9.14.1",
     "fastapi>=0.115.0",
+    "httpx>=0.28.1",
     "mcp>=1.0.0",
     "openai>=2.32.0",
     "pathspec>=1.1.0",

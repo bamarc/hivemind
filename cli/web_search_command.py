@@ -11,6 +11,7 @@ def register(app: typer.Typer):
         query: str = typer.Argument(..., help="Web search query."),
         max_results: int = typer.Option(10, "--max-results", "-n", help="Maximum number of results (1-20)."),
         backend: Optional[str] = typer.Option(None, "--backend", "-b", help="Search backend override (duckduckgo, brave, searxng)."),
+        categories: Optional[str] = typer.Option(None, "--categories", "-c", help="Comma-separated search categories (searxng only)."),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed logging."),
     ):
         """Search the web and display results in the terminal."""
@@ -21,7 +22,8 @@ def register(app: typer.Typer):
 
         with console.status("[bold green]Searching the web..."):
             try:
-                results = search_web(query, max_results=max_results, backend=backend)
+                cat_list = categories.split(",") if categories else None
+                results = search_web(query, max_results=max_results, backend=backend, categories=cat_list)
             except ImportError as e:
                 console.print(
                     "[red]Search dependencies are not installed.[/red]\n\n"
