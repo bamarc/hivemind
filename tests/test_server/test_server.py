@@ -248,6 +248,22 @@ class TestSearchWeb:
         assert "Error" in result
         assert "ddgs" in result
 
+    def test_categories_passed_to_core(self):
+        """The ``categories`` parameter should be passed to core_search_web."""
+        with patch("server.server.core_search_web") as mock_fn:
+            mock_fn.return_value = [MagicMock(title="T", url="https://x.com", snippet="S")]
+            search_web("python", categories=["it", "science"])
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs.get("categories") == ["it", "science"]
+
+    def test_categories_none_by_default(self):
+        """When ``categories`` is not provided, it should be None."""
+        with patch("server.server.core_search_web") as mock_fn:
+            mock_fn.return_value = [MagicMock(title="T", url="https://x.com", snippet="S")]
+            search_web("python")
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs.get("categories") is None
+
 
 class TestScoutUrls:
     """Tests for the ``scout_urls`` MCP tool."""
@@ -535,6 +551,25 @@ class TestDeepResearch:
             result = await deep_research("test")
         assert "Error" in result
         assert "crawl4ai" in result
+
+    async def test_categories_passed_to_core(self):
+        """The ``categories`` parameter should be forwarded to core_search_web."""
+        with patch("server.server.core_search_web") as mock_search, \
+             patch("scout.crawler.ScoutCrawler") as mock_crawler_cls:
+            mock_search.return_value = [
+                MagicMock(title="T", url="https://x.com", snippet="S"),
+            ]
+            mock_crawler = MagicMock()
+            async def fake_crawl(urls, **_kw):
+                for u in urls:
+                    yield u, "# Doc\nContent."
+            mock_crawler.crawl_batch = fake_crawl
+            mock_crawler_cls.return_value = mock_crawler
+
+            await deep_research("test", categories=["news"])
+        call_kwargs = mock_search.call_args.kwargs
+        assert call_kwargs.get("categories") == ["news"]
+
 
     async def test_max_results_clamps_urls(self):
         """max_results should limit how many search results are considered."""
