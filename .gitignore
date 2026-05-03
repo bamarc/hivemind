@@ -23,3 +23,13 @@ secrets.yaml
 tmp
 plans
 scratch
+
+# Terraform
+infra/terraform/**/terraform.tfvars
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.backup
+
+# Ansible vault encrypted files (plaintext versions)
+infra/ansible/**/vault.yml
+!infra/ansible/**/vault.yml.enc
