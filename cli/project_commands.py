@@ -13,7 +13,13 @@ def register(app: typer.Typer):
 
     @app.command("init", no_args_is_help=False)
     def init_project():
-        """Initialize a Hivemind project configuration for the current directory."""
+        """Initialize a Hivemind project configuration for the current directory.
+
+        Creates a minimal ``.hivemind/config.yaml`` with only project-specific
+        settings (collection name, log path, scout output directory). Model
+        configuration, API keys, and other global settings are inherited from
+        ``~/.hivemind/config.yaml`` at runtime (see :mod:`core.config`).
+        """
         import os
         from pathlib import Path
 
@@ -31,31 +37,20 @@ def register(app: typer.Typer):
 
         import yaml
 
-        global_config_path = Path(os.path.expanduser("~/.hivemind/config.yaml"))
-
-        config_data = {}
-        if global_config_path.exists():
-            try:
-                with open(global_config_path, "r") as f:
-                    config_data = yaml.safe_load(f) or {}
-                console.print(f"[dim]Loaded base config from {global_config_path}[/dim]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not read global config: {e}[/yellow]")
-        else:
-            console.print("[yellow]Warning: No global config found at ~/.hivemind/config.yaml. Using empty base.[/yellow]")
-
-        # Ensure nested dictionaries exist
-        config_data.setdefault('qdrant', {})
-        config_data.setdefault('logging', {})
-        config_data.setdefault('scout', {})
-
-        # Overwrite specific values for this project
-        config_data['qdrant']['collection_name'] = current_dir_name
-        config_data['logging']['file_path'] = str(log_path)
-
-        # Ensure scout output goes into .hivemind
-        config_data.setdefault('scout', {})
-        config_data['scout']['output_directory'] = '.hivemind/scout'
+        # Only write project-specific overrides.
+        # Model/chat/qdrant URL/API keys are inherited from
+        # ~/.hivemind/config.yaml at config-load time.
+        config_data = {
+            "qdrant": {
+                "collection_name": current_dir_name,
+            },
+            "logging": {
+                "file_path": str(log_path),
+            },
+            "scout": {
+                "output_directory": ".hivemind/scout",
+            },
+        }
 
         try:
             with open(config_path, "w") as f:
@@ -66,16 +61,6 @@ def register(app: typer.Typer):
         except Exception as e:
             console.print(f"[red]Failed to write configuration: {e}[/red]")
             raise typer.Exit(1)
-
-        # Create scout output directory if scout URLs are configured
-        scout_urls = config_data.get('scout', {}).get('urls', [])
-        if scout_urls:
-            scout_dir = project_dir / "scout"
-            try:
-                scout_dir.mkdir(parents=True, exist_ok=True)
-                console.print(f"Scout output directory created: [cyan]{scout_dir}[/cyan]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not create scout directory: {e}[/yellow]")
 
         # Ensure .hivemind is in .gitignore
         gitignore_path = Path(".gitignore")

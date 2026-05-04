@@ -7,6 +7,8 @@ from rich.console import Console
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.panel import Panel
 
+from core.secrets import encrypt as _encrypt_secret
+
 console = Console()
 
 def run_command(command: list, description: str):
@@ -125,7 +127,7 @@ def setup_wizard():
     }
     
     if model_key:
-        config["model"]["api_key"] = model_key
+        config["model"]["api_key"] = _encrypt_secret(model_key)
 
     # Save Config
     with open(config_file, "w") as f:

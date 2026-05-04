@@ -30,10 +30,12 @@ def register(parent_app: typer.Typer):
         except ImportError:
             console.print(
                 "[red]Scout dependencies are not installed.[/red]\n\n"
-                "To use the web scout, install the extended version:\n\n"
+                "To use the web scout, install with scout dependencies:\n\n"
+                "  [bold]bash install.sh[/bold]\n\n"
+                "Or via uv directly:\n\n"
                 "  [bold]uv tool install --reinstall --force . --with crawl4ai --with playwright[/bold]\n\n"
-                "Or run the extended installer:\n\n"
-                "  [bold]bash install.sh --extended[/bold]"
+                "For a minimal (core-only) install, use:\n\n"
+                "  [bold]bash install.sh --minimal[/bold]"
             )
             raise typer.Exit(1)
 
