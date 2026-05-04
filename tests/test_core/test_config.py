@@ -185,6 +185,51 @@ class TestSettingsYamlLoading:
         s = Settings()
         assert s.qdrant.collection_name == "test_collection"
 
+    def test_global_fallback_source_fills_missing_keys(self, tmp_path: Path):
+        """``_GlobalFallbackYamlSource`` merges global YAML into gaps
+        left by the project config."""
+        import yaml
+        import core.config as cfg
+
+        # Project config: only sets model.api_url
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        hive_dir = project_dir / ".hivemind"
+        hive_dir.mkdir()
+        project_yaml = hive_dir / "config.yaml"
+        project_yaml.write_text(yaml.dump({
+            "model": {"api_url": "http://project:1234/v1"},
+        }))
+
+        # Global config: has model.model_name and qdrant
+        global_dir = tmp_path / ".hivemind"
+        global_dir.mkdir(parents=True)
+        global_yaml = global_dir / "config.yaml"
+        global_yaml.write_text(yaml.dump({
+            "model": {"api_url": "http://global:1234/v1", "model_name": "global-model"},
+            "qdrant": {"collection_name": "global_collection"},
+        }))
+
+        # Point _GLOBAL_CONFIG_PATH at our fake global file
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(cfg, "_GLOBAL_CONFIG_PATH", global_yaml)
+
+        # Walk into the project dir so project yaml is found
+        cwd = Path.cwd()
+        try:
+            os.chdir(str(project_dir))
+            src = cfg._GlobalFallbackYamlSource(Settings)
+
+            # Project value should win
+            assert src.yaml_data["model"]["api_url"] == "http://project:1234/v1"
+            # Global value should fill the gap
+            assert src.yaml_data["model"]["model_name"] == "global-model"
+            # Global-only section should be present
+            assert src.yaml_data["qdrant"]["collection_name"] == "global_collection"
+        finally:
+            os.chdir(str(cwd))
+            monkeypatch.undo()
+
     def test_env_var_override(self, monkeypatch):
         """Environment variables prefixed with ``HIVEMIND_`` should
         override YAML and defaults."""
