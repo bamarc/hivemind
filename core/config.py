@@ -1,13 +1,23 @@
+from __future__ import annotations
+
 import os
+import yaml
 from pathlib import Path
-from typing import List, Optional, Literal, Tuple
-from pydantic import Field, SecretStr
+from typing import Any, List, Optional, Literal, Tuple
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import (
-    BaseSettings, 
-    SettingsConfigDict, 
-    PydanticBaseSettingsSource, 
+    BaseSettings,
+    SettingsConfigDict,
+    PydanticBaseSettingsSource,
     YamlConfigSettingsSource
 )
+
+from core.secrets import decrypt as _decrypt_secret, is_encrypted as _is_encrypted
+
+# Path to the global config file (~/.hivemind/config.yaml).
+# Exposed as a module-level variable so tests can override it directly
+# without relying on HOME monkeypatching.
+_GLOBAL_CONFIG_PATH: Path = Path("~/.hivemind/config.yaml").expanduser()
 
 class ScoutSettings(BaseSettings):
     urls: List[str] = []
@@ -28,10 +38,24 @@ class ScoutSettings(BaseSettings):
     searxng_url: str = "http://localhost:8888"
     searxng_categories: List[str] = []
 
+    @field_validator("brave_api_key", mode="before")
+    @classmethod
+    def _decrypt_brave_key(cls, v: Any) -> Any:
+        if isinstance(v, str) and _is_encrypted(v):
+            return _decrypt_secret(v)
+        return v
+
 class QdrantSettings(BaseSettings):
     url: str = "http://localhost:6333"
     api_key: Optional[SecretStr] = None
     collection_name: str = "hivemind_code"
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _decrypt_api_key(cls, v: Any) -> Any:
+        if isinstance(v, str) and _is_encrypted(v):
+            return _decrypt_secret(v)
+        return v
 
 class EmbeddingSettings(BaseSettings):
     api_url: str = "http://localhost:1234/v1"
@@ -40,10 +64,24 @@ class EmbeddingSettings(BaseSettings):
     embedding_dim: int = 2500
     batch_size: int = 100
 
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _decrypt_api_key(cls, v: Any) -> Any:
+        if isinstance(v, str) and _is_encrypted(v):
+            return _decrypt_secret(v)
+        return v
+
 class ChatSettings(BaseSettings):
     api_url: str = "http://localhost:1234/v1"
     model_name: str = "gpt-4o"
     api_key: Optional[SecretStr] = None
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _decrypt_api_key(cls, v: Any) -> Any:
+        if isinstance(v, str) and _is_encrypted(v):
+            return _decrypt_secret(v)
+        return v
 
 class BySizeSettings(BaseSettings):
     chunk_size: int = 500
@@ -87,13 +125,48 @@ class PreprocessorSettings(BaseSettings):
     # Allow users to add custom directories for pre-processors if needed
     plugin_directories: List[Path] = []
 
+class _GlobalFallbackYamlSource(YamlConfigSettingsSource):
+    """Reads from project YAML files *and* ``~/.hivemind/config.yaml``.
+
+    The global config is treated as lowest-priority YAML: it only fills in
+    keys that are **not** present in the project config.
+    """
+
+    def __init__(self, settings_cls: type[BaseSettings]) -> None:
+        # Let the parent read project YAML files (from yaml_file in model_config)
+        super().__init__(settings_cls)
+
+        # Also read ~/.hivemind/config.yaml as a lower-priority fallback.
+        # Uses module-level _GLOBAL_CONFIG_PATH so tests can override it.
+        _glob_path = _GLOBAL_CONFIG_PATH
+        if _glob_path.exists():
+            try:
+                with open(_glob_path) as f:
+                    global_data = yaml.safe_load(f) or {}
+            except Exception:
+                return
+
+            # Merge: global values only fill gaps that project config leaves.
+            self._merge_fallback(self.yaml_data, global_data)
+
+    @staticmethod
+    def _merge_fallback(dest: dict, source: dict) -> None:
+        """Recursively merge *source* into *dest*, only writing keys that
+        are missing from *dest*."""
+        for key, value in source.items():
+            if key not in dest:
+                dest[key] = value
+            elif isinstance(value, dict) and isinstance(dest.get(key), dict):
+                _GlobalFallbackYamlSource._merge_fallback(dest[key], value)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="HIVEMIND_",
         env_nested_delimiter="__",
         yaml_file=(
-            ".hivemind/config.yaml",
-            "config.yaml"
+            "config.yaml",           # Legacy project config
+            ".hivemind/config.yaml",  # Project config (highest YAML priority)
         )
     )
 
@@ -127,10 +200,10 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return (
-            init_settings,
-            env_settings,
-            YamlConfigSettingsSource(settings_cls),
-            file_secret_settings,
+            init_settings,              # Constructor kwargs (highest priority)
+            env_settings,               # Environment variables
+            _GlobalFallbackYamlSource(settings_cls),  # YAML: project overrides global
+            file_secret_settings,       # Secrets file (lowest priority)
         )
 
 settings = Settings()
