@@ -13,24 +13,24 @@ Hivemind is a semantic code indexer and search tool. It allows you to index loca
 
 ## Installation & Setup
 
-Hivemind offers two installation profiles:
+Hivemind offers two install profiles:
 
-| Profile | Includes | Use Case |
-|---------|----------|----------|
-| **Standard** (default) | Core + Web Search (`ddgs`) | Code indexing, semantic search & web search |
-| **Extended** | Standard + Web Scout (`crawl4ai`, `playwright`) | Also crawling & scraping full web pages |
+| Profile | Command | Includes | Use Case |
+|---------|---------|----------|----------|
+| **Full** (default) | `bash install.sh` | Core + Web Search + Web Scout | Code indexing, search & web crawling |
+| **Minimal** | `bash install.sh --minimal` | Core + Web Search | Code indexing & search only |
 
-The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB). If you only need code indexing and web search, the standard install is sufficient.
+The **Web Scout** requires `crawl4ai` and `playwright` (which downloads Chromium, ~300 MB). These are included in the default install. If you only need code indexing and web search, use the `--minimal` flag.
 
 ### 1. The Interactive Setup (Recommended)
 If you are setting up Hivemind for the first time, use the interactive wizard. It will help you configure your models and even start a local Qdrant instance via Docker.
 
 ```bash
-# Standard install (core + web search)
+# Full setup (core + web search + web crawler)
 ./setup.sh
 
-# Extended install (adds full web crawler)
-./setup.sh --extended
+# Minimal setup (core + web search only)
+./setup.sh --minimal
 ```
 *Note: You can run this anytime later using `hivemind setup`.*
 
@@ -38,11 +38,11 @@ If you are setting up Hivemind for the first time, use the interactive wizard. I
 If you just want to install/update the `hivemind` tool globally without a wizard:
 
 ```bash
-# Standard install (core + web search)
+# Full install (core + web search + web crawler)
 ./install.sh
 
-# Extended install (adds full web crawler)
-./install.sh --extended
+# Minimal install (core + web search only)
+./install.sh --minimal
 ```
 
 ## Quick Start

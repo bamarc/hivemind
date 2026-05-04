@@ -5,29 +5,30 @@ set -e
 # Hivemind Setup Wizard
 # ──────────────────────────────────────────────────────────────────────
 # Usage:
-#   bash setup.sh              # Standard install (core + web search)
-#   bash setup.sh --extended   # Extended install (adds crawl4ai, playwright)
+#   bash setup.sh              # Full setup (core + scout + web search)
+#   bash setup.sh --extended   # Same as default (full setup)
+#   bash setup.sh --minimal    # Minimal setup (core + web search only)
 # ──────────────────────────────────────────────────────────────────────
 
-EXTENDED=false
-if [ "${1:-}" = "--extended" ]; then
-    EXTENDED=true
+MINIMAL=false
+if [ "${1:-}" = "--minimal" ]; then
+    MINIMAL=true
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🧙  Hivemind Dynamic Setup Wizard"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# 1. Ensure the tool is installed and synced
+# 1. Ensure dependencies are installed
 echo "📦 Preparing environment..."
 
-if [ "$EXTENDED" = true ]; then
-    echo "🌐 Extended install: including scout dependencies (crawl4ai, playwright)..."
-    uv sync --quiet --extra scout
-else
-    echo "🔧 Standard install: core + web search (duckduckgo-search)."
-    echo "   To include the full web crawler, run: bash setup.sh --extended"
+if [ "$MINIMAL" = true ]; then
+    echo "🔧 Minimal setup: core + web search only."
+    echo "   To include the full web crawler, run: bash setup.sh"
     uv sync --quiet --extra web
+else
+    echo "🌐 Full setup: including scout dependencies (crawl4ai, playwright)..."
+    uv sync --quiet --extra scout --extra web
 fi
 
 # 2. Run the interactive wizard
