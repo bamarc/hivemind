@@ -14,8 +14,9 @@ Settings are loaded in the following order of precedence (later overrides earlie
 
 . **Defaults**: Defined in `core/config.py` as Pydantic model defaults.
 . **YAML Files** (in order):
-.. `.hivemind/config.yaml` — Project-local configuration in the `.hivemind` directory.
+.. `~/.hivemind/config.yaml` — Global configuration (fallback for all projects).
 .. `config.yaml` — Legacy project-local configuration in the workspace root.
+.. `.hivemind/config.yaml` — Project-local configuration (highest YAML priority).
 . **Environment Variables**: Prefixed with `HIVEMIND_`.
 
 === Environment Variables
@@ -326,6 +327,30 @@ The state directory contains:
 | `$HIVEMIND_WORKSPACE_PATH` or `cwd()`
 | The workspace root path. Auto-detected from environment or current directory.
 |===
+
+== Secret Encryption
+
+API keys stored in `~/.hivemind/config.yaml` are encrypted at rest using
+Fernet symmetric encryption (via the `cryptography` library).
+
+. The encryption key lives at `~/.hivemind/secret.key` (``0600`` permissions).
+. The key is auto-generated the first time a secret is encrypted.
+. Encrypted values in YAML are prefixed with `enc://`, keeping the file
+  human-readable while protecting secrets at rest.
+
+[source,yaml]
+----
+# ~/.hivemind/config.yaml
+model:
+  api_url: "http://localhost:1234/v1"
+  api_key: "enc://gAAAAABm..."  # ← encrypted
+  model_name: "qwen3-4B-embedding"
+----
+
+When the configuration is loaded, the `enc://` prefix is detected and the
+value is automatically decrypted before use.
+
+Implementation: link:../core/secrets.py[core/secrets.py]
 
 == Example Configuration
 
