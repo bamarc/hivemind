@@ -5,6 +5,7 @@ description = "Semantic code indexer, search tool, and MCP server for AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=44.0.0",
     "ddgs>=9.14.1",
     "fastapi>=0.115.0",
     "httpx>=0.28.1",
