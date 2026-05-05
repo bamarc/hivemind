@@ -1,8 +1,12 @@
 import logging
+import re
+import hashlib
 import threading
+from functools import lru_cache
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 from qdrant_client import QdrantClient, models
+from qdrant_client import models as qdrant_models
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
@@ -113,6 +117,81 @@ def get_embedding(text: str) -> list[float]:
         raise ValueError(f"Embedding returned empty result for text of length {len(text)}")
     return results[0]
 
+
+@lru_cache(maxsize=1)
+def detect_embedding_dim() -> int:
+    """Auto-detect embedding dimension by sending a single probe request.
+
+    Cached via ``lru_cache`` so the probe happens at most once per process
+    lifetime.  Raises ``RuntimeError`` if the API returns no data.
+
+    Returns
+    -------
+    int
+        The dimensionality of vectors returned by the configured embedding model.
+    """
+    client = get_embedder()
+    from .config import settings
+
+    response = client.embeddings.create(
+        input=["probe"],
+        model=settings.model.model_name,
+    )
+    if not response.data:
+        raise RuntimeError(
+            f"Embedding API at {settings.model.api_url!r} returned no data "
+            f"for model {settings.model.model_name!r}."
+        )
+    dim = len(response.data[0].embedding)
+    logger.info(
+        "Auto-detected embedding dimension: %d (model=%s)",
+        dim,
+        settings.model.model_name,
+    )
+    return dim
+
+
+# ---------------------------------------------------------------------------
+# Sparse vector generation (for hybrid search)
+# ---------------------------------------------------------------------------
+
+
+def text_to_sparse_vector(text: str) -> qdrant_models.SparseVector:
+    """Convert text to a sparse vector using word-level TF hashing.
+
+    Each unique word is hashed to an integer index in [0, VOCAB_SIZE).
+    The value is the normalized term frequency (sqrt(count)).
+    No external model required — pure Python tokenization.
+
+    Parameters
+    ----------
+    text : str
+        Input text to convert.
+
+    Returns
+    -------
+    qdrant_models.SparseVector
+        Qdrant sparse vector with ``indices`` and ``values``.
+    """
+    from .config import settings
+
+    vocab_size = settings.sparse.vocab_size
+    tokens = re.findall(r"[a-zA-Z_]\w*", text.lower())
+    freq: dict[int, float] = {}
+    for token in tokens:
+        idx = int(hashlib.md5(token.encode()).hexdigest(), 16) % vocab_size
+        freq[idx] = freq.get(idx, 0.0) + 1.0
+
+    # L2-normalize the sparse vector
+    squared_sum = sum(v * v for v in freq.values())
+    norm = squared_sum ** 0.5
+
+    indices = sorted(freq.keys())
+    values = [freq[i] / norm for i in indices] if norm > 0 else []
+
+    return qdrant_models.SparseVector(indices=indices, values=values)
+
+
 def check_qdrant_connection() -> bool:
     """Verify connection to Qdrant."""
     try:
@@ -142,9 +221,16 @@ def init_collection():
             client.create_collection(
                 collection_name=settings.qdrant.collection_name,
                 vectors_config=models.VectorParams(
-                    size=settings.model.embedding_dim,
+                    size=detect_embedding_dim(),
                     distance=models.Distance.COSINE,
                 ),
+                sparse_vectors_config={
+                    "code-sparse": models.SparseVectorParams(
+                        index=models.SparseIndexParams(
+                            on_disk=False,
+                        )
+                    )
+                },
             )
             # Create payload indexes for metadata-aware filtering
             client.create_payload_index(
@@ -159,13 +245,31 @@ def init_collection():
                 collection_name=settings.qdrant.collection_name
             )
             existing_dim = collection_info.config.params.vectors.size
-            configured_dim = settings.model.embedding_dim
-            if existing_dim != configured_dim:
+            detected_dim = detect_embedding_dim()
+            if existing_dim != detected_dim:
                 raise ValueError(
                     f"Embedding dimension mismatch: existing collection has "
-                    f"dimension {existing_dim}, but configuration specifies "
-                    f"{configured_dim}. Please update 'embedding_dim' in your "
-                    f"config or delete the collection to recreate it."
+                    f"dimension {existing_dim}, but model "
+                    f"'{settings.model.model_name}' returns dimension "
+                    f"{detected_dim}. Delete the collection or switch "
+                    f"to a model with dimension {existing_dim}."
+                )
+            # Check if sparse vector config exists on existing collection
+            try:
+                sparse_config = collection_info.config.params.sparse_vectors
+                has_sparse = (
+                    sparse_config is not None
+                    and isinstance(sparse_config, dict)
+                    and "code-sparse" in sparse_config
+                )
+            except Exception:
+                has_sparse = False
+            if not has_sparse:
+                logger.warning(
+                    "Existing collection '%s' has no 'code-sparse' sparse vector. "
+                    "Hybrid search will not work until the collection is re-created. "
+                    "Delete the collection and re-index to enable hybrid search.",
+                    settings.qdrant.collection_name,
                 )
             logger.debug(
                 f"Collection '{settings.qdrant.collection_name}' already exists "

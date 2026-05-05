@@ -55,3 +55,8 @@ logging:
 
 git_enabled: true
 git_only_tracked: false
+
+# Sparse vector configuration (for hybrid search)
+# sparse:
+#   enabled: true
+#   vocab_size: 50000

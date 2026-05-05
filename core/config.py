@@ -61,7 +61,7 @@ class EmbeddingSettings(BaseSettings):
     api_url: str = "http://localhost:1234/v1"
     model_name: str = "qwen3-4B-embedding"
     api_key: Optional[SecretStr] = None
-    embedding_dim: int = 2500
+    embedding_dim: Optional[int] = None  # None = auto-detect via probe request
     batch_size: int = 100
 
     @field_validator("api_key", mode="before")
@@ -94,6 +94,12 @@ class ByLinesSettings(BaseSettings):
 class ASTSettings(BaseSettings):
     chunk_lines: int = 50
     overlap_lines: int = 5
+
+class SparseSettings(BaseSettings):
+    """Configuration for sparse vector generation (hybrid search)."""
+    enabled: bool = True  # Set False to skip sparse vector generation during indexing
+    vocab_size: int = 50_000  # Hash space for sparse token indices
+
 
 class ChunkingSettings(BaseSettings):
     strategy: Literal["by_size", "by_lines", "ast"] = "ast"
@@ -190,6 +196,7 @@ class Settings(BaseSettings):
     security: SecuritySettings = SecuritySettings()
     scout: ScoutSettings = ScoutSettings()
     preprocessor: PreprocessorSettings = PreprocessorSettings()
+    sparse: SparseSettings = SparseSettings()
     git_enabled: bool = True
     git_only_tracked: bool = False
     indexer_workers: int = 4
@@ -217,3 +224,14 @@ class Settings(BaseSettings):
         )
 
 settings = Settings()
+
+
+def reset_settings() -> None:
+    """Reset the module-level settings singleton.
+
+    Creates a fresh ``Settings()`` instance, reading from current
+    environment variables and filesystem state.  Use this in tests
+    to ensure a clean configuration slate between test cases.
+    """
+    global settings
+    settings = Settings()
