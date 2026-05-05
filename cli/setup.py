@@ -84,9 +84,9 @@ def setup_wizard():
     # 3. Embedding Model Setup
     console.print("\n[bold cyan]Step 2: Embedding Model[/bold cyan]")
     console.print("[dim]Used for indexing code. Works best with LM Studio or OpenAI.[/dim]")
+    console.print("[dim]Embedding dimension is auto-detected via a probe request.[/dim]")
     model_url = Prompt.ask("Embedding API URL", default=current_config.get("model", {}).get("api_url", "http://localhost:1234/v1"))
     model_name = Prompt.ask("Model Name", default=current_config.get("model", {}).get("model_name", "qwen3-4B-embedding"))
-    model_dim = IntPrompt.ask("Embedding Dimensions", default=current_config.get("model", {}).get("embedding_dim", 2500))
     model_key = Prompt.ask("API Key (optional)", password=True, default=current_config.get("model", {}).get("api_key", ""))
 
     # 4. LLM Chat Setup
@@ -109,7 +109,6 @@ def setup_wizard():
         "model": {
             "api_url": model_url,
             "model_name": model_name,
-            "embedding_dim": model_dim
         },
         "chat": {
             "api_url": chat_url,
@@ -135,10 +134,6 @@ def setup_wizard():
 
     console.print(f"\n[bold green]✨ Configuration saved to {config_file}[/bold green]")
     
-    if Confirm.ask("\nDo you want to initialize a project in the current directory now?"):
-        # Delayed import to avoid circular dependencies if called from main
-        import main
-        main.init_project()
 
 if __name__ == "__main__":
     setup_wizard()

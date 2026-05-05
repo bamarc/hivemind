@@ -57,7 +57,7 @@ EXTRA_GROUPS: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 MCP_TOOLS: list[dict[str, Any]] = [
-    {"name": "semantic_code_search",     "required": "core",      "desc": "Find code by meaning (requires Qdrant + embedding model)"},
+    {"name": "semantic_code_search",     "required": "core",      "desc": "Find code by meaning with hybrid mode (dense + sparse vector fusion)"},
     {"name": "get_file_tree",            "required": "core",      "desc": "Structural project directory overview"},
     {"name": "get_index_status",         "required": "core",      "desc": "Check if the semantic-search index is ready"},
     {"name": "start_indexing",           "required": "core",      "desc": "Trigger background indexing for a project"},
@@ -69,6 +69,7 @@ MCP_TOOLS: list[dict[str, Any]] = [
     {"name": "deep_research",           "required": "scout_deps", "desc": "Search web + crawl top results in one step"},
     {"name": "read_file",               "required": "core",      "desc": "Read file contents with optional line range"},
     {"name": "get_git_history",          "required": "core",      "desc": "Get last commit metadata for a file"},
+    {"name": "answer_code_question",    "required": "chat_api",  "desc": "RAG-style Q&A about the codebase using semantic search + chat model"},
 ]
 
 
@@ -126,7 +127,12 @@ def register(app: typer.Typer):
         cfg.add_row("Collection",    settings.qdrant.collection_name)
         cfg.add_row("Embedding API", settings.model.api_url)
         cfg.add_row("Embedding Model", settings.model.model_name)
-        cfg.add_row("Embedding Dim", str(settings.model.embedding_dim))
+        try:
+            from core.clients import detect_embedding_dim
+            detected = detect_embedding_dim()
+            cfg.add_row("Embedding Dim", f"{detected} (auto-detected)")
+        except Exception:
+            cfg.add_row("Embedding Dim", "(unable to detect)")
         cfg.add_row("Chat API",      settings.chat.api_url)
         cfg.add_row("Chat Model",    settings.chat.model_name)
         cfg.add_row("Search Backend", settings.scout.search_backend)
