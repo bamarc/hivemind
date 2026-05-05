@@ -425,6 +425,9 @@ class TestIndexer:
         idx.task_queue.unfinished_tasks = 0  # allow the wait loop to exit
         idx.state_manager = MagicMock()
         idx.state_manager.should_reindex.return_value = True
+        # Disable git filtering so project config (git_only_tracked) doesn't
+        # reject mock paths that aren't real git-tracked files.
+        idx.git_manager = None
 
         mock_walk.return_value = [
             ("/project", ["subdir"], ["main.py", "data.xyz", "readme.md"]),
@@ -506,6 +509,9 @@ class TestIndexer:
         idx.state_manager = MagicMock()
         idx.state_manager.should_reindex.return_value = True
         idx.workers = [MagicMock() for _ in idx.workers]
+        # Disable git filtering so project config (git_only_tracked) doesn't
+        # reject mock paths that aren't real git-tracked files.
+        idx.git_manager = None
 
         mock_walk.return_value = [
             ("/project", [], ["main.py"]),

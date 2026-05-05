@@ -130,7 +130,7 @@ class ScoutManager:
         base_delay: Optional[float] = None
     ):
         """Run the scout on the provided URLs or from config."""
-        target_urls = urls or settings.scout.urls
+        target_urls = urls if urls is not None else settings.scout.urls
         # Expand any range placeholders like {1..10}
         target_urls = self._expand_urls(target_urls)
         
