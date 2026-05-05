@@ -20,6 +20,7 @@ secrets.yaml
 .idea
 .vscode
 .kilocode
+.opencode
 tmp
 plans
 scratch

@@ -202,7 +202,7 @@ class Indexer:
     def _upsert_indexing_metadata(self, workspace_path: Path, complete: bool = True):
         """Upsert a metadata point to Qdrant to track indexing status."""
         # Create a deterministic ID for this workspace's metadata
-        meta_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace_path}_indexing_metadata"))
+        meta_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace_path.resolve().absolute()}_indexing_metadata"))
         
         # Use a zero vector for the metadata point (not used for search)
         vector = [0.0] * settings.model.embedding_dim
