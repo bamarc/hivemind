@@ -112,12 +112,18 @@ class IndexWorker(threading.Thread):
         if chunks:
             # Batch fetch embeddings
             texts = [chunk.content for chunk in chunks]
-            from core.clients import get_embeddings_batch
+            from core.clients import get_embeddings_batch, text_to_sparse_vector
             vectors = get_embeddings_batch(texts)
             
             for i, chunk in enumerate(chunks):
                 vector = vectors[i]
                 point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{chunk.filepath}_chunk_{chunk.chunk_index}"))
+                
+                # Generate sparse vector for hybrid search (if enabled)
+                if settings.sparse.enabled:
+                    sparse_vector = text_to_sparse_vector(chunk.content)
+                else:
+                    sparse_vector = models.SparseVector(indices=[], values=[])
                 
                 # Process path segments for hierarchical filtering
                 rel_path = chunk.filepath
@@ -148,7 +154,10 @@ class IndexWorker(threading.Thread):
                 
                 points.append({
                     "id": point_id,
-                    "vector": vector,
+                    "vector": {
+                        "": vector,
+                        "code-sparse": sparse_vector,
+                    },
                     "payload": payload
                 })
         embed_time = time.perf_counter() - t1

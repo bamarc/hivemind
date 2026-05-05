@@ -13,7 +13,7 @@ from qdrant_client import models
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.live import Live
 from rich.console import Console
-from core.clients import get_db, get_embeddings_batch
+from core.clients import get_db, get_embeddings_batch, detect_embedding_dim
 from core.config import settings
 from core.filesystem import EXCLUDED_DIRS
 from .state import StateManager
@@ -203,9 +203,12 @@ class Indexer:
         """Upsert a metadata point to Qdrant to track indexing status."""
         # Create a deterministic ID for this workspace's metadata
         meta_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{workspace_path.resolve().absolute()}_indexing_metadata"))
-        
+
         # Use a zero vector for the metadata point (not used for search)
-        vector = [0.0] * settings.model.embedding_dim
+        vector = {
+            "": [0.0] * detect_embedding_dim(),
+            "code-sparse": models.SparseVector(indices=[], values=[]),
+        }
         
         payload = {
             "type": "metadata",
