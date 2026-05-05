@@ -17,6 +17,7 @@ import pytest
 # We import them directly and call them like normal functions.
 from server.server import (
     analyze_code_complexity,
+    answer_code_question,
     deep_research,
     generate_blueprint,
     get_file_tree,
@@ -70,6 +71,62 @@ class TestSemanticCodeSearch:
         mock_qdrant.query_points.side_effect = RuntimeError("Qdrant down")
         result = semantic_code_search("test")
         assert "Error executing semantic search" in result
+
+    # ================================================================
+    #  Mode tests (dense / sparse / hybrid)
+    # ================================================================
+
+    def test_dense_mode_default(self, mock_qdrant: MagicMock):
+        """Default mode='auto' should use pure dense vector search."""
+        mock_qdrant.query_points.return_value = MagicMock(
+            points=[MagicMock(id=0, score=0.9, payload={"filepath": "f.py", "content": "c", "language": "py"})]
+        )
+        result = semantic_code_search("test", mode="auto")
+        assert "f.py" in result
+        call_kwargs = mock_qdrant.query_points.call_args.kwargs
+        # Dense mode: query is a vector (list), no prefetch or fusion
+        assert "query" in call_kwargs and isinstance(call_kwargs["query"], list)
+        assert "prefetch" not in call_kwargs
+        assert "query_filter" in call_kwargs
+
+    def test_dense_mode_explicit(self, mock_qdrant: MagicMock):
+        """Explicit mode='dense' should behave the same as 'auto'."""
+        mock_qdrant.query_points.return_value = MagicMock(
+            points=[MagicMock(id=0, score=0.9, payload={"filepath": "f.py", "content": "c", "language": "py"})]
+        )
+        result = semantic_code_search("test", mode="dense")
+        assert "f.py" in result
+        call_kwargs = mock_qdrant.query_points.call_args.kwargs
+        assert "query" in call_kwargs and isinstance(call_kwargs["query"], list)
+        assert "prefetch" not in call_kwargs
+
+    def test_sparse_mode(self, mock_qdrant: MagicMock):
+        """mode='sparse' should use ``using='code-sparse'`` with a SparseVector query."""
+        mock_qdrant.query_points.return_value = MagicMock(
+            points=[MagicMock(id=0, score=0.8, payload={"filepath": "f.py", "content": "c", "language": "py"})]
+        )
+        result = semantic_code_search("hello world", mode="sparse")
+        assert "f.py" in result
+        call_kwargs = mock_qdrant.query_points.call_args.kwargs
+        # Sparse mode: query is a SparseVector, using="code-sparse"
+        assert call_kwargs.get("using") == "code-sparse"
+        query = call_kwargs.get("query")
+        assert hasattr(query, "indices")
+        assert hasattr(query, "values")
+        assert "prefetch" not in call_kwargs
+
+    def test_hybrid_mode(self, mock_qdrant: MagicMock):
+        """mode='hybrid' should use prefetch with dense + sparse + FusionQuery."""
+        mock_qdrant.query_points.return_value = MagicMock(
+            points=[MagicMock(id=0, score=0.85, payload={"filepath": "f.py", "content": "c", "language": "py"})]
+        )
+        result = semantic_code_search("hello world", mode="hybrid")
+        assert "f.py" in result
+        call_kwargs = mock_qdrant.query_points.call_args.kwargs
+        # Hybrid mode: has prefetch and FusionQuery
+        assert "prefetch" in call_kwargs
+        assert len(call_kwargs["prefetch"]) == 2
+        assert "fusion" in str(call_kwargs.get("query", "")) or "FusionQuery" in str(type(call_kwargs.get("query")))
 
 
 class TestGetFileTree:
@@ -703,3 +760,123 @@ class TestGetGitHistory:
                 result = get_git_history(str(f))
 
         assert "No git history found" in result
+
+
+class TestAnswerCodeQuestion:
+    """Tests for the ``answer_code_question`` MCP tool."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_search_results(self, mock_qdrant: MagicMock):
+        """Set up Qdrant to return one code chunk hit by default."""
+        mock_qdrant.query_points.return_value = MagicMock(
+            points=[
+                MagicMock(
+                    id=0,
+                    score=0.95,
+                    payload={
+                        "filepath": "/proj/auth.py",
+                        "content": "def authenticate(user, pwd): ...",
+                        "language": "python",
+                        "line_start": 10,
+                        "line_end": 25,
+                    },
+                )
+            ]
+        )
+        yield
+
+    @staticmethod
+    def _make_chat_response(text: str) -> MagicMock:
+        """Build a mock chat completion that returns *text* as the answer."""
+        choice = MagicMock()
+        choice.message.content = text
+        completion = MagicMock()
+        completion.choices = [choice]
+        return completion
+
+    def test_returns_answer_with_sources(
+        self, mock_qdrant: MagicMock, mock_chat_client: MagicMock
+    ):
+        """A successful query should return ``## Answer`` and ``## Sources`` sections."""
+        mock_chat_client.chat.completions.create = MagicMock(
+            return_value=self._make_chat_response(
+                "Authentication is handled in auth.py."
+            )
+        )
+        result = answer_code_question("How does auth work?")
+        assert "## Answer" in result
+        assert "## Sources" in result
+        assert "Authentication is handled in auth.py." in result
+        assert "auth.py" in result
+        assert "0.95" in result
+
+    def test_no_results_message(self, mock_qdrant: MagicMock):
+        """When Qdrant returns no results, return a helpful message."""
+        mock_qdrant.query_points.return_value = MagicMock(points=[])
+        result = answer_code_question("How does auth work?")
+        assert "couldn't find any relevant code" in result
+        assert "start_indexing" in result
+
+    def test_context_injected_into_system_prompt(
+        self, mock_qdrant: MagicMock, mock_chat_client: MagicMock
+    ):
+        """The optional ``context`` parameter should appear in the system prompt."""
+        mock_create = MagicMock(
+            return_value=self._make_chat_response("Answer.")
+        )
+        mock_chat_client.chat.completions.create = mock_create
+        answer_code_question(
+            "How does auth work?",
+            context="I'm adding OAuth support.",
+        )
+        call_args = mock_create.call_args
+        messages = call_args.kwargs["messages"]
+        system_msg = messages[0]["content"]
+        assert "OAuth support" in system_msg
+        assert "Answer the user's question based ONLY" in system_msg
+
+    def test_user_prompt_contains_question_and_chunks(
+        self, mock_qdrant: MagicMock, mock_chat_client: MagicMock
+    ):
+        """The user prompt should include the question and formatted code chunks."""
+        mock_create = MagicMock(
+            return_value=self._make_chat_response("Answer.")
+        )
+        mock_chat_client.chat.completions.create = mock_create
+        answer_code_question("How does auth work?")
+        call_args = mock_create.call_args
+        messages = call_args.kwargs["messages"]
+        user_msg = messages[1]["content"]
+        assert "How does auth work?" in user_msg
+        assert "auth.py" in user_msg
+        assert "def authenticate" in user_msg
+
+    def test_citations_include_filepath_and_score(
+        self, mock_qdrant: MagicMock, mock_chat_client: MagicMock
+    ):
+        """Citations should contain filepath with line numbers and score."""
+        mock_chat_client.chat.completions.create.return_value = (
+            self._make_chat_response("Answer.")
+        )
+        result = answer_code_question("How does auth work?")
+        assert "/proj/auth.py" in result
+        assert "0.95" in result
+        assert "lines 10-25" in result
+
+    def test_temperature_is_low(
+        self, mock_qdrant: MagicMock, mock_chat_client: MagicMock
+    ):
+        """The chat completion should use a low temperature for deterministic answers."""
+        mock_create = MagicMock(
+            return_value=self._make_chat_response("Answer.")
+        )
+        mock_chat_client.chat.completions.create = mock_create
+        answer_code_question("How does auth work?")
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs.get("temperature") == 0.3
+
+    def test_error_handling(self, mock_qdrant: MagicMock):
+        """An exception should be caught and returned as a string, not propagated."""
+        mock_qdrant.query_points.side_effect = RuntimeError("Qdrant down")
+        result = answer_code_question("test")
+        assert "Error answering question" in result

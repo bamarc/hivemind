@@ -25,6 +25,11 @@ import pytest
 # 1.  Build the mock objects
 # ---------------------------------------------------------------------------
 
+# Fixed embedding dimension used by all mock responses.  This ensures
+# deterministic test behaviour even when ``settings.model.embedding_dim``
+# is ``None`` (the default after auto-detect was introduced).
+MOCK_EMBEDDING_DIM: int = 2500
+
 # ── Qdrant client mock ────────────────────────────────────────────────
 MOCK_QDRANT: MagicMock = MagicMock(name="MockQdrantClient")
 
@@ -36,10 +41,19 @@ def _collection_mock(collection_name: str) -> MagicMock:
     return col
 
 
+def _resolve_dim() -> int:
+    """Return the configured embedding dimension or the mock default."""
+    from core.config import settings
+
+    return settings.model.embedding_dim or MOCK_EMBEDDING_DIM
+
+
 def _reset_qdrant():
     """Reset MOCK_QDRANT to a known good state, clearing any side_effect,
     return_value, and call-history leakage from the previous test."""
     from core.config import settings
+
+    dim = _resolve_dim()
 
     MOCK_QDRANT.reset_mock()
     MOCK_QDRANT.get_collections.side_effect = None
@@ -62,7 +76,10 @@ def _reset_qdrant():
     MOCK_QDRANT.get_collection.return_value = MagicMock(
         config=MagicMock(
             params=MagicMock(
-                vectors=MagicMock(size=settings.model.embedding_dim),
+                vectors=MagicMock(size=dim),
+                sparse_vectors={
+                    "code-sparse": MagicMock(),
+                },
             ),
         ),
         points_count=42,
@@ -77,9 +94,7 @@ MOCK_EMBEDDER: MagicMock = MagicMock(name="MockEmbedder")
 
 def _fake_embedding_response(*, input, model, **_kwargs):
     """Return a fake embedding response for a single string or list of strings."""
-    from core.config import settings
-
-    dim = settings.model.embedding_dim
+    dim = _resolve_dim()
 
     if isinstance(input, str):
         inputs = [input]
@@ -98,7 +113,12 @@ def _fake_embedding_response(*, input, model, **_kwargs):
     return response_mock
 
 
-MOCK_EMBEDDER.embeddings.create = _fake_embedding_response
+# Use a MagicMock with side_effect so callers can assert on invocations
+# while still getting realistic fake embedding vectors.
+MOCK_EMBEDDER.embeddings.create = MagicMock(
+    side_effect=_fake_embedding_response,
+    name="MockEmbedder.embeddings.create",
+)
 
 # ── Chat client mock ──────────────────────────────────────────────────
 MOCK_CHAT_CLIENT: MagicMock = MagicMock(name="MockChatClient")
@@ -155,6 +175,54 @@ def _patch_clients():
         p.stop()
 
 
+# ── Config isolation (MUST run before _reset_module_mocks) ─────────────
+@pytest.fixture(autouse=True)
+def _isolate_config(monkeypatch) -> Generator[None, None, None]:
+    """Isolate every test from global config, project YAML, and env vars.
+
+    This fixture:
+    1. Saves and clears all ``HIVEMIND_*`` environment variables
+    2. Points ``_GLOBAL_CONFIG_PATH`` to a nonexistent file
+    3. Resets ``embedding_dim`` to ``None`` so that mock helpers always use
+       the deterministic ``MOCK_EMBEDDING_DIM`` constant
+    4. Calls ``reset_settings()`` to recreate the singleton with clean state
+    5. After the test, restores env vars and resets settings again
+
+    This runs BEFORE ``_reset_module_mocks`` (defined later in this file)
+    so that mock defaults are computed from the isolated settings values.
+    """
+    import os as _os
+    from core.config import reset_settings
+
+    # 1. Save and clear HIVEMIND_* env vars
+    _saved_env: dict[str, str] = {}
+    for _key in list(_os.environ.keys()):
+        if _key.startswith("HIVEMIND_"):
+            _saved_env[_key] = _os.environ.pop(_key)
+
+    # 2. Point global config to a nonexistent file
+    monkeypatch.setattr(
+        "core.config._GLOBAL_CONFIG_PATH",
+        Path("/nonexistent/hivemind_global_config.yaml"),
+    )
+
+    # 3. Reset the settings singleton with clean state
+    reset_settings()
+    # Force embedding_dim to None so _resolve_dim() falls back to
+    # MOCK_EMBEDDING_DIM, regardless of any project-level config.yaml.
+    # Re-import after reset_settings() since it reassigns the module-level
+    # ``settings`` variable to a new ``Settings()`` instance.
+    from core.config import settings as _new_s
+    _new_s.model.embedding_dim = None
+
+    yield
+
+    # 4. Restore env vars and reset settings
+    for _key, _value in _saved_env.items():
+        _os.environ[_key] = _value
+    reset_settings()
+
+
 # ---------------------------------------------------------------------------
 # 3.  Deterministic embedding helper (for assertions in tests)
 # ---------------------------------------------------------------------------
@@ -165,9 +233,7 @@ def fake_embedding_vector(index: int = 0) -> list[float]:
     can verify the vectors that get passed to Qdrant (or returned from
     the embedder) match expectations.
     """
-    from core.config import settings
-
-    dim = settings.model.embedding_dim
+    dim = _resolve_dim()
     return [float((index + j % 255) / 255.0) for j in range(dim)]
 
 
@@ -183,7 +249,10 @@ def _reset_module_mocks() -> Generator[None, None, None]:
     we must restore the defaults to prevent state leaking between tests.
     """
     _reset_qdrant()
-    MOCK_EMBEDDER.embeddings.create = _fake_embedding_response
+    MOCK_EMBEDDER.embeddings.create = MagicMock(
+        side_effect=_fake_embedding_response,
+        name="MockEmbedder.embeddings.create",
+    )
     MOCK_CHAT_CLIENT.chat.completions.create = _fake_chat_completion
     yield
 
@@ -199,7 +268,14 @@ def mock_qdrant() -> MagicMock:
 
 @pytest.fixture
 def mock_embedder() -> MagicMock:
-    """Return the module-level mocked embedder for per-test configuration."""
+    """Return the module-level mocked embedder for per-test configuration.
+
+    Also clears the ``detect_embedding_dim`` LRU cache so that tests
+    calling ``detect_embedding_dim()`` always get a fresh probe result.
+    """
+    from core.clients import detect_embedding_dim
+
+    detect_embedding_dim.cache_clear()
     return MOCK_EMBEDDER
 
 
@@ -231,6 +307,8 @@ def tmp_project(tmp_path: Path) -> Path:
         yield tmp_path
     finally:
         os.chdir(str(cwd))
+        from core.config import reset_settings
+        reset_settings()
 
 
 @pytest.fixture

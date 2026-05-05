@@ -20,11 +20,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from core.clients import get_embeddings_batch
-from core.config import settings
+from core import config
 from indexer.state import StateManager
 from indexer.chunkers.base import Chunk
 from indexer.index_worker import IndexWorker
 from indexer.watcher import Indexer, CodeHandler
+from tests.conftest import MOCK_EMBEDDING_DIM
 
 
 # ======================================================================
@@ -165,13 +166,13 @@ class TestFullIndexingPipeline:
 
         query_vector = get_embeddings_batch(["hello greeting"])[0]
         get_db().query_points(
-            collection_name=settings.qdrant.collection_name,
+            collection_name=config.settings.qdrant.collection_name,
             query=query_vector,
             limit=5,
         )
         call_kwargs = get_db().query_points.call_args.kwargs
-        assert call_kwargs["collection_name"] == settings.qdrant.collection_name
-        assert len(call_kwargs["query"]) == settings.model.embedding_dim
+        assert call_kwargs["collection_name"] == config.settings.qdrant.collection_name
+        assert len(call_kwargs["query"]) == MOCK_EMBEDDING_DIM
 
     def test_incremental_index_skips_unchanged_files(
         self,
@@ -256,7 +257,7 @@ class TestFullIndexingPipeline:
 
         # Mock an existing collection with a *different* dimension
         mock_qdrant.get_collections.return_value = MagicMock(
-            collections=[_collection_mock(settings.qdrant.collection_name)]
+            collections=[_collection_mock(config.settings.qdrant.collection_name)]
         )
         mock_qdrant.get_collection.return_value = MagicMock(
             config=MagicMock(

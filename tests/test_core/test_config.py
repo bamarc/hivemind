@@ -52,9 +52,10 @@ class TestEmbeddingSettings:
         assert isinstance(s.model_name, str)
         assert len(s.model_name) > 0
 
-    def test_embedding_dim_positive(self):
+    def test_embedding_dim_default_is_none(self):
+        """``embedding_dim`` defaults to ``None`` — auto-detected at runtime."""
         s = EmbeddingSettings()
-        assert s.embedding_dim > 0
+        assert s.embedding_dim is None
 
     def test_batch_size_positive(self):
         s = EmbeddingSettings()
