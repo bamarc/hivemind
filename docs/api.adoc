@@ -21,6 +21,10 @@ The MCP server is implemented in link:../server/server.py[server/server.py] usin
 | *Always first.* Find code by meaning, not filename. Use natural language queries.
 
 | 🥇
+| `answer_code_question`
+| *RAG-style Q&A.* Ask natural language questions about the codebase — retrieves relevant chunks and synthesizes an answer with citations.
+
+| 🥇
 | `deep_research`
 | *Web research in one call.* Combines `search_web` + `scout_urls` — searches the web, crawls top results, returns chunk-truncated markdown.
 
@@ -98,6 +102,11 @@ Implementation: link:../server/server.py[server/server.py, 24-105]
 | No
 | —
 | `true` for only test files, `false` to exclude them.
+
+| `mode`
+| No
+| `"auto"`
+| Search mode: `"auto"` or `"dense"` (pure vector), `"sparse"` (keyword-based), `"hybrid"` (dense + sparse fused via Reciprocal Rank Fusion).
 |===
 
 ==== Filtering Logic
@@ -114,6 +123,66 @@ if language:
 if is_test is not None:
     must_filters.append(FieldCondition(key="is_test", match=MatchValue(value=is_test)))
 search_filter = Filter(must=must_filters) if must_filters else None
+----
+
+=== `answer_code_question`
+
+**RAG-style Q&A about the codebase.** Retrieves relevant code chunks via semantic search and uses the chat model to synthesize a natural language answer grounded in the retrieved code.
+
+Implementation: link:../server/server.py[server/server.py, 163-227]
+
+==== Parameters
+
+[cols="2,2,2,5"]
+|===
+| Parameter | Required | Default | Description
+
+| `question`
+| Yes
+| —
+| Natural language question about the codebase (e.g., `"How does user authentication work?"`).
+
+| `context`
+| No
+| `""`
+| Optional extra context about what you're trying to accomplish (e.g., `"I'm adding OAuth support"`). Injected into the system prompt.
+
+| `max_chunks`
+| No
+| `5`
+| Maximum number of code chunks to retrieve for grounding the answer.
+
+| `project_path`
+| No
+| auto-detected
+| Project root path for the search scope.
+|===
+
+==== Flow
+
+. Runs semantic search to find relevant code chunks.
+. Formats chunks into a prompt with filepath citations.
+. Sends the prompt to the configured chat model (`settings.chat.model_name`).
+. Returns the synthesized answer with `## Sources` section containing filepath links with line numbers and relevance scores.
+
+==== Response Format
+
+[source]
+----
+## Answer
+
+The authentication system uses JWTs validated in `src/auth.py`.
+
+## Sources
+
+- [`/proj/auth.py`](/proj/auth.py:10) (score: 0.95, lines 10-25)
+----
+
+When no indexed code matches the question, returns:
+
+[source]
+----
+I couldn't find any relevant code to answer that question. Make sure the project has been indexed (use `start_indexing`).
 ----
 
 === `deep_research`

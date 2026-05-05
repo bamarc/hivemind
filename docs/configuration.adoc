@@ -77,15 +77,15 @@ export HIVEMIND_SCOUT__MAX_PAGES_PER_DOMAIN=100
 | API Key for the embedding service.
 
 | `embedding_dim`
-| `2500`
-| Dimension of the generated vectors. Must match the model's output dimension.
+| `null` (auto-detected)
+| Dimension of the generated vectors. When `null` (the default), the dimension is auto-detected at startup via a single probe request to the embedding API. You can still set an explicit value for backward compatibility.
 
 | `batch_size`
 | `100`
 | Batch size for embedding requests. Texts are processed in sub-batches to avoid API limits.
 |===
 
-IMPORTANT: If the `embedding_dim` changes after a collection already exists, `init_collection()` will raise a `ValueError` with instructions to update the config or delete the collection.
+IMPORTANT: When `embedding_dim` is unset (or `null`), the dimension is auto-detected. If the auto-detected dimension differs from an existing Qdrant collection, `init_collection()` will raise a `ValueError` with instructions to switch models or delete the collection. Explicitly setting `embedding_dim` in your config still works for backward compatibility.
 
 === Chat (`chat`)
 
