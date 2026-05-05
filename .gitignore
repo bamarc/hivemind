@@ -14,6 +14,7 @@ tmp
 .hivemind/
 config.yaml
 secrets.yaml
+swarmstate.json
 *.log
 
 # development folders
