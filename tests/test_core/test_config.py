@@ -134,9 +134,11 @@ class TestStateSettings:
 class TestSettings:
     @pytest.fixture(autouse=True)
     def _backup_env(self, monkeypatch):
-        """Backup HIVEMIND_* env vars and restore after each test."""
-        # The Settings singleton is already loaded – we test the defaults
-        # by creating a fresh instance per test.
+        """Isolate from the user's global config and env vars."""
+        import core.config as cfg
+        # Point global config to a non-existent file so this test class
+        # only sees project YAML and built-in defaults.
+        monkeypatch.setattr(cfg, "_GLOBAL_CONFIG_PATH", Path("/nonexistent/global.yaml"))
         yield
 
     def test_default_project_name(self):

@@ -148,6 +148,16 @@ class _GlobalFallbackYamlSource(YamlConfigSettingsSource):
 
             # Merge: global values only fill gaps that project config leaves.
             self._merge_fallback(self.yaml_data, global_data)
+            # Sync init_kwargs with the now-merged yaml_data so that
+            # __call__() returns the full configuration including global
+            # fallback values, not just project-level YAML.
+            for key, value in self.yaml_data.items():
+                if key not in self.init_kwargs:
+                    self.init_kwargs[key] = value
+                elif isinstance(value, dict) and isinstance(
+                    self.init_kwargs.get(key), dict
+                ):
+                    self._merge_fallback(self.init_kwargs[key], value)
 
     @staticmethod
     def _merge_fallback(dest: dict, source: dict) -> None:
