@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 from mcp.server.fastmcp import FastMCP
-from core.clients import get_db, get_embedding, get_chat_client
+from core.clients import get_db, get_embedding, get_chat_client, text_to_sparse_vector
 from core.config import settings
 from core.complexity import get_complexity
 from core.filesystem import get_file_tree as core_get_file_tree, file_contents
@@ -28,7 +28,8 @@ def semantic_code_search(
     root_path: str = None,
     file_filter: str = None,
     language: str = None,
-    is_test: bool = None
+    is_test: bool = None,
+    mode: str = "auto",
 ) -> str:
     """
     PRIMARY tool for code discovery. Find code by meaning, not by filename.
@@ -46,41 +47,83 @@ def semantic_code_search(
         file_filter: Filter results to files whose path contains this substring (e.g., "server/" for server code, "test_" for test files).
         language: Programming language to filter by (e.g., "python", "typescript", "rust"). Leave empty for all languages.
         is_test: Set True to return only test files, False to exclude test files, None (default) for no filter.
+        mode: Search mode — "auto" or "dense" (pure vector, default), "sparse" (keyword-based), "hybrid" (dense + sparse fused via RRF).
     """
     try:
         from pathlib import Path
         root = Path(root_path) if root_path else settings.workspace_path
         collection_name = root.name if root_path else settings.qdrant.collection_name
 
-        logger.info(f"Executing semantic search in '{collection_name}' for: '{query}'")
+        logger.info(f"Executing semantic search in '{collection_name}' for: '{query}' (mode={mode})")
         query_vector = get_embedding(query)
 
         # Build Qdrant filter
         must_filters = []
         if file_filter:
             must_filters.append(models.FieldCondition(
-                key="filepath", 
+                key="filepath",
                 match=models.MatchText(text=file_filter)
             ))
         if language:
             must_filters.append(models.FieldCondition(
-                key="language", 
+                key="language",
                 match=models.MatchValue(value=language)
             ))
         if is_test is not None:
             must_filters.append(models.FieldCondition(
-                key="is_test", 
+                key="is_test",
                 match=models.MatchValue(value=is_test)
             ))
 
         search_filter = models.Filter(must=must_filters) if must_filters else None
 
-        response = get_db().query_points(
-            collection_name=collection_name,
-            query=query_vector,
-            limit=limit,
-            query_filter=search_filter
-        )
+        if mode == "hybrid":
+            # Hybrid: dense + sparse with RRF fusion
+            sparse_vector = text_to_sparse_vector(query)
+
+            response = get_db().query_points(
+                collection_name=collection_name,
+                prefetch=[
+                    models.Prefetch(
+                        query=query_vector,
+                        limit=limit * 2,
+                        filter=search_filter,
+                    ),
+                    models.Prefetch(
+                        query=models.SparseVector(
+                            indices=sparse_vector.indices,
+                            values=sparse_vector.values,
+                        ),
+                        using="code-sparse",
+                        limit=limit * 2,
+                        filter=search_filter,
+                    ),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=limit,
+            )
+        elif mode == "sparse":
+            # Pure sparse (keyword) search using TF-hashing
+            sparse_vector = text_to_sparse_vector(query)
+
+            response = get_db().query_points(
+                collection_name=collection_name,
+                query=models.SparseVector(
+                    indices=sparse_vector.indices,
+                    values=sparse_vector.values,
+                ),
+                using="code-sparse",
+                limit=limit,
+                query_filter=search_filter,
+            )
+        else:
+            # "auto" or "dense" — pure vector search (backward compatible)
+            response = get_db().query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                limit=limit,
+                query_filter=search_filter,
+            )
         search_results = response.points
 
         if not search_results:
@@ -103,6 +146,140 @@ def semantic_code_search(
     except Exception as e:
         logger.error(f"Error executing semantic search: {e}")
         return f"Error executing semantic search: {str(e)}"
+
+# ---------------------------------------------------------------------------
+# RAG-Style Code Q&A helpers
+# ---------------------------------------------------------------------------
+
+
+def _semantic_search_raw(
+    query: str,
+    limit: int = 5,
+    root_path: str = None,
+) -> list[dict]:
+    """Run semantic search and return raw payload dicts (no markdown formatting)."""
+    from pathlib import Path
+
+    root = Path(root_path) if root_path else settings.workspace_path
+    collection_name = root.name if root_path else settings.qdrant.collection_name
+    query_vector = get_embedding(query)
+
+    response = get_db().query_points(
+        collection_name=collection_name,
+        query=query_vector,
+        limit=limit,
+    )
+    return [
+        {
+            "filepath": hit.payload.get("filepath", "unknown"),
+            "content": hit.payload.get("content", ""),
+            "language": hit.payload.get("language", "text"),
+            "score": hit.score,
+            "line_start": hit.payload.get("line_start", 1),
+            "line_end": hit.payload.get("line_end", "?"),
+        }
+        for hit in response.points
+    ]
+
+
+def _build_qa_system_prompt(context: str) -> str:
+    base = (
+        "You are a senior software engineer analyzing a codebase. "
+        "Answer the user's question based ONLY on the provided code snippets. "
+        "If the snippets don't contain enough information to answer, say so. "
+        "Always reference specific file paths and function/class names. "
+        "Be concise but thorough."
+    )
+    if context:
+        base += f"\n\nAdditional context from the user: {context}"
+    return base
+
+
+def _build_qa_user_prompt(question: str, chunks_text: str) -> str:
+    return (
+        f"## Question\n{question}\n\n"
+        f"## Relevant Code Snippets\n{chunks_text}\n\n"
+        f"## Instructions\n"
+        f"Based on the code snippets above, answer the question. "
+        f"Cite the relevant file paths in your answer."
+    )
+
+
+def _format_chunks_for_qa(chunks: list[dict]) -> str:
+    parts = []
+    for i, chunk in enumerate(chunks, 1):
+        parts.append(
+            f"### [{i}] {chunk['filepath']} (lines {chunk['line_start']}-{chunk['line_end']})\n"
+            f"```{chunk['language']}\n{chunk['content']}\n```\n"
+        )
+    return "\n".join(parts)
+
+
+def _format_citations(chunks: list[dict]) -> str:
+    lines = []
+    for c in chunks:
+        lines.append(
+            f"- [`{c['filepath']}`]({c['filepath']}:{c['line_start']}) "
+            f"(score: {c['score']:.2f}, lines {c['line_start']}-{c['line_end']})"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def answer_code_question(
+    question: str,
+    context: str = "",
+    max_chunks: int = 5,
+    project_path: str = None,
+) -> str:
+    """
+    Answer a natural-language question about the codebase using
+    retrieval-augmented generation (RAG).
+
+    Retrieves relevant code chunks via semantic search and synthesizes
+    an answer using the configured chat model. Returns the answer with
+    filepath citations.
+
+    Args:
+        question: The natural language question about the codebase
+            (e.g., "How does user authentication work?").
+        context: Optional extra context about what you're trying to
+            accomplish (e.g., "I'm adding OAuth support").
+        max_chunks: Maximum number of code chunks to retrieve (default 5).
+        project_path: Project root path for the search scope.
+            Auto-detected from workspace by default.
+    """
+    try:
+        search_results = _semantic_search_raw(
+            question, limit=max_chunks, root_path=project_path
+        )
+        if not search_results:
+            return (
+                "I couldn't find any relevant code to answer that question. "
+                "Make sure the project has been indexed (use `start_indexing`)."
+            )
+
+        chunks_text = _format_chunks_for_qa(search_results)
+        system_prompt = _build_qa_system_prompt(context)
+        user_prompt = _build_qa_user_prompt(question, chunks_text)
+
+        client = get_chat_client()
+        response = client.chat.completions.create(
+            model=settings.chat.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+        )
+        answer = response.choices[0].message.content
+        citations = _format_citations(search_results)
+        return f"## Answer\n\n{answer}\n\n## Sources\n\n{citations}"
+
+    except Exception as e:
+        logger.error(f"Error in answer_code_question: {e}")
+        return f"Error answering question: {str(e)}"
+
 
 @mcp.tool()
 def get_file_tree(root_path: str = None, depth: int = 2) -> str:
