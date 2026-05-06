@@ -41,6 +41,12 @@ class IndexWorker(threading.Thread):
                 chunk_lines=settings.chunking.ast.chunk_lines,
                 overlap_lines=settings.chunking.ast.overlap_lines
             )
+        elif settings.chunking.strategy == "hybrid":
+            from .chunkers.hybrid_ast import ASTEnrichedByLinesChunker
+            self.chunker = ASTEnrichedByLinesChunker(
+                chunk_lines=settings.chunking.hybrid.chunk_lines,
+                overlap_lines=settings.chunking.hybrid.overlap_lines,
+            )
         else:
             self.chunker = BySizeChunker(
                 chunk_size=settings.chunking.by_size.chunk_size,
@@ -112,8 +118,22 @@ class IndexWorker(threading.Thread):
         if chunks:
             # Batch fetch embeddings
             texts = [chunk.content for chunk in chunks]
-            from core.clients import get_embeddings_batch, text_to_sparse_vector
-            vectors = get_embeddings_batch(texts)
+            from core.clients import (
+                AuthenticationError,
+                PermissionDeniedError,
+                get_embeddings_batch,
+                text_to_sparse_vector,
+            )
+            try:
+                vectors = get_embeddings_batch(texts)
+            except (AuthenticationError, PermissionDeniedError):
+                # Non-retryable auth error — re-raise to stop indexing
+                raise
+            except Exception as e:
+                # Retryable — record the failure and skip the file
+                logger.error(f"Embedding failed for {filepath}: {e}")
+                self.state_manager.record_embed_failure(filepath)
+                return
             
             for i, chunk in enumerate(chunks):
                 vector = vectors[i]
@@ -170,10 +190,13 @@ class IndexWorker(threading.Thread):
                 points=points
             )
         upsert_time = time.perf_counter() - t2
-        
+
+        # Clear any previous retry state on success
+        self.state_manager.record_embed_success(filepath)
+
         total_time = time.perf_counter() - start_total
         self.state_manager.update_file_state(filepath, len(chunks))
-        
+
         logger.info(
             f"Indexed {filepath}: {len(chunks)} chunks in {total_time:.2f}s "
             f"(chunk: {chunk_time:.2f}s, embed: {embed_time:.2f}s, upsert: {upsert_time:.2f}s)"

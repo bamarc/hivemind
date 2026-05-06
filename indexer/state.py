@@ -56,26 +56,94 @@ class StateManager:
     def should_reindex(self, filepath: Path) -> bool:
         """Determine whether *filepath* needs to be re-indexed.
 
-        The lock is held for the **entire** decision to avoid a TOCTOU
-        race between checking the stored state and computing the current
-        checksum.
+        Also returns ``False`` if the file has been permanently failed
+        (retry count exceeded) or is in a cooldown period (temporary
+        failure within the backoff window).
         """
         filepath_str = str(filepath.absolute())
 
         with self.lock:
             if filepath_str not in self.state["indexed_files"]:
                 return True
+
             stored_state = self.state["indexed_files"][filepath_str]
 
+            # ── Permanently failed — never retry ──────────────────────
+            if stored_state.get("failed"):
+                logger.debug(f"Skipping permanently failed file: {filepath}")
+                return False
+
+            # ── Cooldown: temporary failure with backoff ──────────────
+            retry_count = stored_state.get("embed_retries", 0)
+            if retry_count > 0:
+                import time
+                # Exponential backoff: 2^retry_count minutes (capped at 60 min)
+                cooldown_minutes = min(2 ** retry_count, 60)
+                last_attempt = stored_state.get("last_embed_attempt", 0.0)
+                elapsed = time.time() - last_attempt
+                if elapsed < cooldown_minutes * 60:
+                    logger.debug(
+                        f"Skipping {filepath} — retry #{retry_count}, "
+                        f"cooldown {cooldown_minutes}min, "
+                        f"{int(cooldown_minutes * 60 - elapsed)}s remaining"
+                    )
+                    return False
+
+            # ── Normal staleness check ────────────────────────────────
             current_mtime = datetime.fromtimestamp(filepath.stat().st_mtime).isoformat()
 
-            if stored_state["last_modified"] != current_mtime:
+            if stored_state.get("last_modified") != current_mtime:
                 # Checksum as a fallback/verification
                 current_hash = self.get_file_hash(filepath)
-                if stored_state["checksum"] != current_hash:
+                if stored_state.get("checksum") != current_hash:
                     return True
 
             return False
+
+    def record_embed_failure(self, filepath: Path, max_retries: int = 5):
+        """Record that embedding failed for *filepath*.
+
+        Increments the retry counter.  When the counter exceeds
+        *max_retries* the file is marked as permanently failed so it
+        will never be retried again.
+        """
+        filepath_str = str(filepath.absolute())
+        import time
+
+        with self.lock:
+            if filepath_str not in self.state["indexed_files"]:
+                self.state["indexed_files"][filepath_str] = {}
+
+            entry = self.state["indexed_files"][filepath_str]
+            entry["last_embed_attempt"] = time.time()
+            retries = entry.get("embed_retries", 0) + 1
+            entry["embed_retries"] = retries
+
+            if retries > max_retries:
+                entry["failed"] = True
+                logger.warning(
+                    f"File {filepath} permanently failed after {retries} "
+                    f"embedding retries.  It will be excluded from future "
+                    f"indexing runs."
+                )
+            else:
+                cooldown = min(2 ** retries, 60)
+                logger.info(
+                    f"Embedding failed for {filepath} (retry #{retries}). "
+                    f"Next attempt in ~{cooldown}min."
+                )
+
+        self.save_state()
+
+    def record_embed_success(self, filepath: Path):
+        """Clear the retry counter after a successful embed."""
+        filepath_str = str(filepath.absolute())
+        with self.lock:
+            if filepath_str in self.state["indexed_files"]:
+                entry = self.state["indexed_files"][filepath_str]
+                entry.pop("embed_retries", None)
+                entry.pop("last_embed_attempt", None)
+                entry.pop("failed", None)
 
     def update_file_state(self, filepath: Path, chunk_count: int):
         filepath_str = str(filepath.absolute())

@@ -103,7 +103,8 @@ class Indexer:
                 char = sys.stdin.read(1)
                 if char.lower() == 'd':
                     self._stop_event.set()
-                    # Restore terminal before callback
+                    # Restore terminal before callback, so the
+                    # background child does not inherit raw mode.
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     detach_callback()
                     return
@@ -112,7 +113,10 @@ class Indexer:
         except Exception as exc:
             logger.debug("Input monitor error (non-fatal): %s", exc)
         finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
 
     def _scan_directory(self, path: Path):
         extensions = self.preprocessor_manager.supported_extensions
@@ -140,6 +144,11 @@ class Indexer:
                 # Prune ignored/blacklisted directories from recursion
                 for d in list(dirs):
                     dir_path = root_path / d
+                    # Skip hidden directories (starting with '.') — includes .hivemind,
+                    # .git (already in EXCLUDED_DIRS), .venv, etc.
+                    if d.startswith("."):
+                        dirs.remove(d)
+                        continue
                     if d in EXCLUDED_DIRS:
                         dirs.remove(d)
                         continue

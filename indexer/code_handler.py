@@ -51,6 +51,12 @@ class CodeHandler(FileSystemEventHandler):
         # Reject files inside excluded directories (derived from core/filesystem.py)
         if any(part in EXCLUDED_DIRS for part in filepath.parts):
             return False
+        
+        # Reject files inside hidden directories (starting with '.') such as
+        # .hivemind/, .git/, etc. This prevents the infinite re-indexing loop
+        # where state.yaml changes trigger re-indexing which triggers more writes.
+        if any(part.startswith(".") and part != "." for part in filepath.parts):
+            return False
             
         return True
 
