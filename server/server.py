@@ -148,81 +148,9 @@ def semantic_code_search(
         return f"Error executing semantic search: {str(e)}"
 
 # ---------------------------------------------------------------------------
-# RAG-Style Code Q&A helpers
+# RAG-Style Code Q&A — delegates to core/rag.py
 # ---------------------------------------------------------------------------
-
-
-def _semantic_search_raw(
-    query: str,
-    limit: int = 5,
-    root_path: str = None,
-) -> list[dict]:
-    """Run semantic search and return raw payload dicts (no markdown formatting)."""
-    from pathlib import Path
-
-    root = Path(root_path) if root_path else settings.workspace_path
-    collection_name = root.name if root_path else settings.qdrant.collection_name
-    query_vector = get_embedding(query)
-
-    response = get_db().query_points(
-        collection_name=collection_name,
-        query=query_vector,
-        limit=limit,
-    )
-    return [
-        {
-            "filepath": hit.payload.get("filepath", "unknown"),
-            "content": hit.payload.get("content", ""),
-            "language": hit.payload.get("language", "text"),
-            "score": hit.score,
-            "line_start": hit.payload.get("line_start", 1),
-            "line_end": hit.payload.get("line_end", "?"),
-        }
-        for hit in response.points
-    ]
-
-
-def _build_qa_system_prompt(context: str) -> str:
-    base = (
-        "You are a senior software engineer analyzing a codebase. "
-        "Answer the user's question based ONLY on the provided code snippets. "
-        "If the snippets don't contain enough information to answer, say so. "
-        "Always reference specific file paths and function/class names. "
-        "Be concise but thorough."
-    )
-    if context:
-        base += f"\n\nAdditional context from the user: {context}"
-    return base
-
-
-def _build_qa_user_prompt(question: str, chunks_text: str) -> str:
-    return (
-        f"## Question\n{question}\n\n"
-        f"## Relevant Code Snippets\n{chunks_text}\n\n"
-        f"## Instructions\n"
-        f"Based on the code snippets above, answer the question. "
-        f"Cite the relevant file paths in your answer."
-    )
-
-
-def _format_chunks_for_qa(chunks: list[dict]) -> str:
-    parts = []
-    for i, chunk in enumerate(chunks, 1):
-        parts.append(
-            f"### [{i}] {chunk['filepath']} (lines {chunk['line_start']}-{chunk['line_end']})\n"
-            f"```{chunk['language']}\n{chunk['content']}\n```\n"
-        )
-    return "\n".join(parts)
-
-
-def _format_citations(chunks: list[dict]) -> str:
-    lines = []
-    for c in chunks:
-        lines.append(
-            f"- [`{c['filepath']}`]({c['filepath']}:{c['line_start']}) "
-            f"(score: {c['score']:.2f}, lines {c['line_start']}-{c['line_end']})"
-        )
-    return "\n".join(lines)
+from core.rag import ask_codebase as _ask_codebase
 
 
 @mcp.tool()
@@ -250,32 +178,15 @@ def answer_code_question(
             Auto-detected from workspace by default.
     """
     try:
-        search_results = _semantic_search_raw(
-            question, limit=max_chunks, root_path=project_path
+        answer, citations = _ask_codebase(
+            question,
+            context=context,
+            max_chunks=max_chunks,
+            project_path=project_path,
         )
-        if not search_results:
-            return (
-                "I couldn't find any relevant code to answer that question. "
-                "Make sure the project has been indexed (use `start_indexing`)."
-            )
-
-        chunks_text = _format_chunks_for_qa(search_results)
-        system_prompt = _build_qa_system_prompt(context)
-        user_prompt = _build_qa_user_prompt(question, chunks_text)
-
-        client = get_chat_client()
-        response = client.chat.completions.create(
-            model=settings.chat.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-        )
-        answer = response.choices[0].message.content
-        citations = _format_citations(search_results)
         return f"## Answer\n\n{answer}\n\n## Sources\n\n{citations}"
-
+    except ValueError as e:
+        return str(e)
     except Exception as e:
         logger.error(f"Error in answer_code_question: {e}")
         return f"Error answering question: {str(e)}"
