@@ -1,5 +1,9 @@
 import typer
+import logging
+import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def register(parent_app: typer.Typer):
@@ -45,9 +49,15 @@ def register(parent_app: typer.Typer):
             log_file = settings.logging.file_path or Path(".hivemind/hivemind.log")
             log_file.parent.mkdir(parents=True, exist_ok=True)
 
+            # Redirect stdin to DEVNULL if our stdin is a terminal, so the
+            # background child does not inherit the terminal's stdin and
+            # compete with the shell for keyboard input.
+            stdin_redir = subprocess.DEVNULL if os.isatty(sys.stdin.fileno()) else None
+
             with open(log_file, "a") as f:
                 p = subprocess.Popen(
                     cmd,
+                    stdin=stdin_redir,
                     stdout=f,
                     stderr=f,
                     start_new_session=True,
