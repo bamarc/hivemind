@@ -288,7 +288,7 @@ def mock_chat_client() -> MagicMock:
 @pytest.fixture
 def tmp_project(tmp_path: Path) -> Path:
     """Create a temporary project directory with a ``.gitignore`` and a
-    ``config.yaml``, and temporarily change the working directory so that
+    ``.hivemind/config.yaml``, and temporarily change the working directory so that
     ``os.getcwd()`` points inside it.
 
     This is useful for tests that depend on :attr:`core.config.settings`
@@ -299,8 +299,10 @@ def tmp_project(tmp_path: Path) -> Path:
         os.chdir(str(tmp_path))
         # Minimal .gitignore
         (tmp_path / ".gitignore").write_text("*.log\n.env\n__pycache__/\n")
-        # Minimal config.yaml
-        (tmp_path / "config.yaml").write_text(
+        # Minimal project config
+        hive_dir = tmp_path / ".hivemind"
+        hive_dir.mkdir()
+        (hive_dir / "config.yaml").write_text(
             "qdrant:\n  collection_name: test_collection\n"
             "logging:\n  level: DEBUG\n"
         )

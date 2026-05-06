@@ -149,14 +149,14 @@ class TestGetEmbeddingsBatch:
         mock_embedder.embeddings.create = original_create
 
     def test_raises_after_retries_exhausted(self, mock_embedder: MagicMock):
-        """After all retry attempts are exhausted the original exception
-        should propagate."""
+        """After all retry attempts are exhausted a wrapper RuntimeError
+        should be raised."""
         def always_fail(*_args, **_kwargs):
             raise RuntimeError("Always failing")
 
         mock_embedder.embeddings.create = always_fail
 
-        with pytest.raises(RuntimeError, match="Always failing"):
+        with pytest.raises(RuntimeError, match="Embedding failed for sub-batch"):
             get_embeddings_batch(["fail"])
 
 # ======================================================================

@@ -210,6 +210,56 @@ In `text` mode, results are displayed as Rich panels with syntax highlighting, l
 
 In `json` mode, results are output as raw JSON for programmatic consumption.
 
+=== `hivemind ask <question>`
+
+Ask a natural-language question about your codebase using RAG (Retrieval-Augmented Generation).
+
+Implementation: link:../cli/ask_command.py[cli/ask_command.py], link:../core/rag.py[core/rag.py]
+
+Retrieves relevant code chunks via semantic search and synthesises an answer using the configured chat/LLM model. Displays the answer in a Rich panel with syntax-highlighted sources and citations.
+
+==== Arguments
+
+* `<question>`: The natural language question about the codebase (e.g., "How does authentication work?").
+
+==== Options
+
+* `--context`, `-c <text>`: Optional extra context about what you're trying to accomplish (default: empty).
+* `--max-chunks`, `-n <int>`: Maximum number of code chunks to retrieve (default: 5, max: 50).
+* `--project-path`, `-p <path>`: Project root path for the search scope. Auto-detected from the current workspace by default.
+* `--verbose`, `-v`: Enable debug logging to see API requests and response details (useful for troubleshooting hangs or errors).
+
+==== Example
+
+[source,console]
+----
+$ hivemind ask "How does the indexing pipeline work?"
+
+╭─── Answer ─────────────────────────────────────────────────────╮
+│                                                                │
+│ The indexing pipeline is orchestrated by the `Indexer` class   │
+│ in `indexer/index_worker.py`. It:                              │
+│                                                                │
+│ 1. Walks the project directory ...                             │
+│                                                                │
+│ **Key files:**                                                 │
+│ - [`indexer/index_worker.py`](indexer/index_worker.py)         │
+│ - [`indexer/watcher.py`](indexer/watcher.py)                   │
+│                                                                │
+╰────────────────────────────────────────────────────────────────╯
+
+╭─── Sources ────────────────────────────────────────────────────╮
+│                                                                │
+│ - [`indexer/index_worker.py`](indexer/index_worker.py:42)      │
+│   (score: 0.92, lines 42-89)                                   │
+│ - [`indexer/watcher.py`](indexer/watcher.py:15)                │
+│   (score: 0.88, lines 15-36)                                   │
+│                                                                │
+╰────────────────────────────────────────────────────────────────╯
+----
+
+The command shares its implementation with the `answer_code_question` MCP tool — both use `core/rag.py` for the full RAG pipeline.
+
 === `hivemind web-search <query>`
 
 Search the web and display results in the terminal.
