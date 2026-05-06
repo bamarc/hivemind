@@ -102,11 +102,12 @@ class SparseSettings(BaseSettings):
 
 
 class ChunkingSettings(BaseSettings):
-    strategy: Literal["by_size", "by_lines", "ast"] = "ast"
+    strategy: Literal["by_size", "by_lines", "ast", "hybrid"] = "ast"
     language_aware: bool = True
     by_size: BySizeSettings = BySizeSettings()
     by_lines: ByLinesSettings = ByLinesSettings()
     ast: ASTSettings = ASTSettings()
+    hybrid: ByLinesSettings = ByLinesSettings()  # reuses line-based settings
 
 class ApiSettings(BaseSettings):
     host: str = "0.0.0.0"
@@ -132,7 +133,7 @@ class PreprocessorSettings(BaseSettings):
     plugin_directories: List[Path] = []
 
 class _GlobalFallbackYamlSource(YamlConfigSettingsSource):
-    """Reads from project YAML files *and* ``~/.hivemind/config.yaml``.
+    """Reads from ``.hivemind/config.yaml`` *and* ``~/.hivemind/config.yaml``.
 
     The global config is treated as lowest-priority YAML: it only fills in
     keys that are **not** present in the project config.
@@ -180,10 +181,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="HIVEMIND_",
         env_nested_delimiter="__",
-        yaml_file=(
-            "config.yaml",           # Legacy project config
-            ".hivemind/config.yaml",  # Project config (highest YAML priority)
-        )
+        yaml_file=".hivemind/config.yaml",  # Project config (highest YAML priority)
     )
 
     qdrant: QdrantSettings = QdrantSettings()

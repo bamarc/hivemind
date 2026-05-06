@@ -43,7 +43,12 @@ def get_db() -> QdrantClient:
 
 
 def get_embedder() -> OpenAI:
-    """Return a lazily-initialised OpenAI client for embeddings (thread-safe)."""
+    """Return a lazily-initialised OpenAI client for embeddings (thread-safe).
+
+    ``max_retries`` is set to 0 because :func:`get_embeddings_batch` owns
+    the retry logic with longer backoff, auth-error skipping, and
+    file-level failure tracking.
+    """
     global _embedder
     if _embedder is None:
         with _clients_lock:
@@ -55,54 +60,128 @@ def get_embedder() -> OpenAI:
                     api_key=settings.model.api_key.get_secret_value()
                     if settings.model.api_key
                     else "empty",
+                    max_retries=0,
                 )
     return _embedder
 
 
 def get_chat_client() -> OpenAI:
-    """Return a lazily-initialised OpenAI client for chat (thread-safe)."""
+    """Return a lazily-initialised OpenAI client for chat (thread-safe).
+
+    If ``chat.api_key`` is not configured, falls back to the embedding
+    model's API key (``model.api_key``) so that users who only configure
+    a single LM Studio / OpenAI endpoint don't need to duplicate the key.
+    """
     global _chat_client
     if _chat_client is None:
         with _clients_lock:
             if _chat_client is None:
                 from .config import settings
 
+                # Fallback chain: chat.api_key -> model.api_key -> "empty"
+                api_key = (
+                    settings.chat.api_key.get_secret_value()
+                    if settings.chat.api_key
+                    else (
+                        settings.model.api_key.get_secret_value()
+                        if settings.model.api_key
+                        else "empty"
+                    )
+                )
+
                 _chat_client = OpenAI(
                     base_url=settings.chat.api_url,
-                    api_key=settings.chat.api_key.get_secret_value()
-                    if settings.chat.api_key
-                    else "empty",
+                    api_key=api_key,
                 )
     return _chat_client
 
+from openai import AuthenticationError, PermissionDeniedError
+
+# ── Per-sub-batch retry helper ────────────────────────────────────────
+
+
+from tenacity import retry_if_not_exception_type
+
+
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    reraise=True
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=4, max=120),
+    reraise=True,
+    retry=retry_if_not_exception_type((AuthenticationError, PermissionDeniedError)),
 )
+def _embed_sub_batch(sub_batch: list[str], model: str) -> list[list[float]]:
+    """Embed a single sub-batch with up to 5 retries, exponential backoff.
+
+    Authentication / permission errors (401, 403) are **not** retried
+    since they will never succeed on subsequent attempts.
+    """
+    from .config import settings
+
+    client = get_embedder()
+    response = client.embeddings.create(
+        input=sub_batch,
+        model=model,
+    )
+    return [item.embedding for item in response.data]
+
+
 def get_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Fetch embeddings for a list of texts from the model API with retry logic."""
+    """Fetch embeddings for a list of texts from the model API.
+
+    Each sub-batch is retried independently with exponential backoff
+    (up to 5 attempts).  401/403 errors are NOT retried.
+
+    Parameters
+    ----------
+    texts:
+        List of text strings to embed.
+
+    Returns
+    -------
+    list[list[float]]
+        Embedding vectors in the same order as *texts*.
+
+    Raises
+    ------
+    AuthenticationError
+        If the API key is invalid / expired (no retry attempted).
+    PermissionDeniedError
+        If access to the model is denied (no retry attempted).
+    RuntimeError
+        If all retries for a sub-batch are exhausted.
+    """
     if not texts:
         return []
 
-    client = get_embedder()
     from .config import settings
 
-    all_embeddings = []
+    all_embeddings: list[list[float]] = []
     batch_size = settings.model.batch_size
 
-    # Process in sub-batches to avoid API limits
     for i in range(0, len(texts), batch_size):
         sub_batch = texts[i : i + batch_size]
         try:
-            response = client.embeddings.create(
-                input=sub_batch,
-                model=settings.model.model_name
+            embeddings = _embed_sub_batch(sub_batch, settings.model.model_name)
+            all_embeddings.extend(embeddings)
+        except AuthenticationError as e:
+            logger.error(
+                f"Authentication failed (401) — API key is invalid or expired. "
+                f"Stopping indexing. Error: {e}"
             )
-            all_embeddings.extend([item.embedding for item in response.data])
-        except Exception as e:
-            logger.error(f"Failed to fetch batch embeddings: {e}")
             raise
+        except PermissionDeniedError as e:
+            logger.error(
+                f"Permission denied (403) — access to model denied. "
+                f"Stopping indexing. Error: {e}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to embed sub-batch after 5 retries: {e}"
+            )
+            raise RuntimeError(
+                f"Embedding failed for sub-batch after all retries exhausted"
+            ) from e
 
     return all_embeddings
 
