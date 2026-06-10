@@ -1,6 +1,6 @@
 # Hivemind - Agent Protocol
 
-Welcome to the Hivemind codebase. This document outlines the architectural rules, boundaries, and conventions for AI agents (Cursor, Roo, Claude, etc.) working on this repository.
+Welcome to the Hivemind codebase. This document outlines the architectural rules, boundaries, and conventions for AI agents (Cursor, Roo, Claude, Jules, GitHub Copilot/Agents, etc.) working on this repository.
 
 ## 1. The Core Philosophy
 
@@ -65,13 +65,14 @@ The project is managed exclusively via **uv**. Do not use `python` or `pip` dire
 
 ### 6.2 Test Before Completion
 
-* Before submitting any change or marking a task as **done**, you **must** run the full test suite:
+* Before submitting any change or marking a task as **done**, you **must** run the full test suite and check coverage using the provided script at the repository root:
 
   ```bash
-  uv run pytest
+  ./run_tests.sh
   ```
 
-* If the change is scoped to a specific area, you may additionally run targeted tests first for faster feedback, but the full suite must pass before final submission.
+* If the change is scoped to a specific area, you may additionally run targeted tests first (`uv run pytest <path>`) for faster feedback, but the full suite script must pass before final submission.
+* Review `.agents/testing_conventions.md` for more detailed testing guidelines.
 
 ### 6.3 Documentation Must Stay In Sync
 
