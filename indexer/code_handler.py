@@ -25,7 +25,22 @@ EXTENSION_TO_LANG = {
     '.css': 'css',
     '.scss': 'scss',
     '.conf': 'config',
-    'Dockerfile': 'dockerfile'
+    'Dockerfile': 'dockerfile',
+    '.java': 'java',
+    '.cs': 'c_sharp',
+    '.rs': 'rust',
+    '.cpp': 'cpp',
+    '.cc': 'cpp',
+    '.cxx': 'cpp',
+    '.hpp': 'cpp',
+    '.json': 'json',
+    '.xml': 'xml',
+    '.html': 'html',
+    '.htm': 'html',
+    '.adoc': 'asciidoc',
+    '.asciidoc': 'asciidoc',
+    '.txt': 'text',
+    '.qml': 'qml'
 }
 
 
