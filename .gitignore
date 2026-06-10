@@ -37,3 +37,4 @@ infra/ansible/**/vault.yml
 !infra/ansible/**/vault.yml.enc
 .coverage
 htmlcov/
+coverage.xml
