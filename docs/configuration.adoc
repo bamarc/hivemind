@@ -218,7 +218,7 @@ IMPORTANT: When `embedding_dim` is unset (or `null`), the dimension is auto-dete
 * `by_lines`: Line-count-based splitting. Useful for uniform line-based analysis.
 * `ast` (default): Tree-sitter AST-aware splitting. Preserves function/class boundaries. Falls back to line-based chunking for unsupported languages.
 
-Supported AST languages: Python, Go, TypeScript, TSX, YAML, HCL.
+Supported AST languages: Python, Go, TypeScript, TSX, YAML, HCL, Java, C#, Rust, C++, C, JavaScript.
 
 === API
 

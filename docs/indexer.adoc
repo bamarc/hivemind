@@ -201,7 +201,7 @@ Uses tree-sitter to parse code into an AST, then creates chunks that respect fun
 . Each function/class definition becomes its own chunk (or multiple chunks if it exceeds `chunk_lines`).
 . Definition chunks carry metadata: `{"type": "function_definition", "symbols": ["function_name"]}`.
 
-Supported languages: Python, Go, TypeScript, TSX, YAML, HCL.
+Supported languages: Python, Go, TypeScript, TSX, YAML, HCL, Java, C#, Rust, C++, C, JavaScript.
 
 The AST chunker also sanitizes content by stripping base64 payloads and excessively long strings.
 
