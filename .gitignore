@@ -35,3 +35,6 @@ infra/terraform/**/*.tfstate.backup
 # Ansible vault encrypted files (plaintext versions)
 infra/ansible/**/vault.yml
 !infra/ansible/**/vault.yml.enc
+.coverage
+htmlcov/
+coverage.xml
