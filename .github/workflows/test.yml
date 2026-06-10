@@ -26,4 +26,5 @@ jobs:
       - name: Run tests with coverage
         run: |
           uv sync --all-extras
+          uv run playwright install --with-deps chromium
           uv run pytest --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=80
