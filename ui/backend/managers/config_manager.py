@@ -69,6 +69,13 @@ class ConfigManager:
     def get_settings(self) -> dict[str, Any]:
         """Return current settings from Hivemind's core Settings singleton."""
         s = settings
+        # Safely extract secret value if present
+        api_key = ""
+        if s.model.api_key:
+            try:
+                api_key = s.model.api_key.get_secret_value()
+            except Exception:
+                api_key = str(s.model.api_key) if s.model.api_key else ""
         return {
             "qdrantHost": s.qdrant.url.replace("http://", "").rsplit(":", 1)[0],
             "qdrantPort": int(s.qdrant.url.rsplit(":", 1)[-1].rstrip("/") or "6333"),
@@ -76,10 +83,46 @@ class ConfigManager:
             "embeddingProvider": "LM Studio",
             "embeddingModel": s.model.model_name,
             "embeddingEndpoint": s.model.api_url,
+            "embeddingApiKey": api_key,
             "watcherEnabled": True,
             "watcherDebounce": 2.0,
         }
 
     def save_settings(self, data: dict[str, Any]) -> None:
-        """Persist settings to Hivemind's config.yaml (stub — TBD)."""
-        logger.info("Settings update requested: %s", data)
+        """Persist settings to Hivemind's project config.yaml."""
+        import os
+        from pathlib import Path
+        import yaml
+
+        # Determine config path
+        project_config = settings.workspace_path / ".hivemind" / "config.yaml"
+
+        # Load existing config or start fresh
+        existing = {}
+        if project_config.exists():
+            with open(project_config) as f:
+                existing = yaml.safe_load(f) or {}
+
+        # Ensure nested structure
+        existing.setdefault("model", {})
+        existing["model"]["api_key"] = data.get("embeddingApiKey", "")
+        existing["model"]["api_url"] = data.get("embeddingEndpoint", settings.model.api_url)
+        existing["model"]["model_name"] = data.get("embeddingModel", settings.model.model_name)
+
+        existing.setdefault("qdrant", {})
+        existing["qdrant"]["url"] = "http://{}:{}".format(
+            data.get("qdrantHost", "localhost"),
+            data.get("qdrantPort", 6333),
+        )
+        existing["qdrant"]["collection_name"] = data.get("collectionName", settings.qdrant.collection_name)
+
+        # Write back
+        project_config.parent.mkdir(parents=True, exist_ok=True)
+        with open(project_config, "w") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        # Reload settings singleton
+        from core.config import reset_settings
+        reset_settings()
+
+        logger.info("Settings saved to %s", project_config)

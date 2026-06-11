@@ -16,6 +16,7 @@ Kirigami.ScrollablePage {
         providerCombo.currentIndex = findProviderIndex(s.embeddingProvider || "LM Studio");
         modelField.text = s.embeddingModel || "";
         endpointField.text = s.embeddingEndpoint || "";
+        apiKeyField.text = s.embeddingApiKey || "";
         watcherSwitch.checked = s.watcherEnabled !== false;
         debounceSlider.value = s.watcherDebounce || 2.0;
     }
@@ -35,6 +36,7 @@ Kirigami.ScrollablePage {
             "embeddingProvider": providerCombo.currentText,
             "embeddingModel": modelField.text,
             "embeddingEndpoint": endpointField.text,
+            "embeddingApiKey": apiKeyField.text,
             "watcherEnabled": watcherSwitch.checked,
             "watcherDebounce": debounceSlider.value,
         };
@@ -175,6 +177,19 @@ Kirigami.ScrollablePage {
 
                     QQC2.Label { text: "Endpoint:"; Layout.minimumWidth: Kirigami.Units.gridUnit * 4 }
                     QQC2.TextField { id: endpointField; placeholderText: "http://localhost:1234/v1"; Layout.fillWidth: true }
+                }
+
+                RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+                    Layout.fillWidth: true
+
+                    QQC2.Label { text: "API Key:"; Layout.minimumWidth: Kirigami.Units.gridUnit * 4 }
+                    QQC2.TextField {
+                        id: apiKeyField
+                        placeholderText: "sk-..."
+                        echoMode: TextInput.Password
+                        Layout.fillWidth: true
+                    }
                 }
             }
         }
