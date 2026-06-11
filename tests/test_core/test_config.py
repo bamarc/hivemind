@@ -233,6 +233,29 @@ class TestSettingsYamlLoading:
             os.chdir(str(cwd))
             monkeypatch.undo()
 
+    def test_global_fallback_source_logs_warning_on_error(self, tmp_path: Path, caplog):
+        """``_GlobalFallbackYamlSource`` logs a warning if the global config file
+        exists but fails to load (e.g. invalid YAML or permission error)."""
+        import core.config as cfg
+
+        global_yaml = tmp_path / "bad_config.yaml"
+        # Write invalid YAML
+        global_yaml.write_text("invalid: [yaml: content")
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(cfg, "_GLOBAL_CONFIG_PATH", global_yaml)
+
+        try:
+            with caplog.at_level("WARNING"):
+                src = cfg._GlobalFallbackYamlSource(Settings)
+
+            # The config object should still initialize successfully,
+            # but we should see a warning in the logs.
+            assert any("Failed to load global config from" in record.message for record in caplog.records)
+            assert any("bad_config.yaml" in record.message for record in caplog.records)
+        finally:
+            monkeypatch.undo()
+
     def test_env_var_override(self, monkeypatch):
         """Environment variables prefixed with ``HIVEMIND_`` should
         override YAML and defaults."""

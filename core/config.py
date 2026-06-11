@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import yaml
 from pathlib import Path
@@ -11,6 +12,8 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     YamlConfigSettingsSource
 )
+
+logger = logging.getLogger(__name__)
 
 from core.secrets import decrypt as _decrypt_secret, is_encrypted as _is_encrypted
 
@@ -150,7 +153,8 @@ class _GlobalFallbackYamlSource(YamlConfigSettingsSource):
             try:
                 with open(_glob_path) as f:
                     global_data = yaml.safe_load(f) or {}
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to load global config from {_glob_path}: {e}")
                 return
 
             # Merge: global values only fill gaps that project config leaves.
