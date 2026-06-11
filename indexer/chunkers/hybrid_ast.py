@@ -198,5 +198,5 @@ class ASTEnrichedByLinesChunker(ChunkingStrategy):
         """Extract the declared name from a definition node."""
         for child in node.children:
             if child.type in ("identifier", "type_identifier", "name"):
-                return child.text.decode("utf8")
+                return child.text.decode("utf8", errors="replace")
         return None
