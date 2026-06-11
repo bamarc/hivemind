@@ -61,8 +61,9 @@ The indexer handles file discovery, reading, chunking, and ingestion into Qdrant
   ** `base.py` — Abstract `ChunkingStrategy` and `Chunk` dataclass.
   ** `by_size.py` — Character-size-based chunking with overlap.
   ** `by_lines.py` — Line-count-based chunking with overlap.
-  ** `ast.py` — AST-aware chunking using tree-sitter (Python, Go, TypeScript, YAML, HCL).
+  ** `ast.py` — AST-aware chunking using tree-sitter (Python, Go, TypeScript, YAML, HCL, Java, C#, Rust, C++, C, JavaScript).
   ** `markdown.py` — Header-aware Markdown chunking.
+  ** `markup/` — Dedicated chunkers for JSON, HTML, XML, CSS, SCSS, and Asciidoc.
 * `indexer/preprocessors/` — Pluggable file pre-processors:
   ** `base.py` — Abstract `BasePreprocessor`.
   ** `text.py` — Default text file reader (`.py`, `.go`, `.js`, `.ts`, `.md`, etc.).

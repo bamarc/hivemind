@@ -277,7 +277,7 @@ complexity_score = (max_depth * 0.4) + (node_count * 0.01) + (def_count * 0.5) +
 * Score > 50: "Escalate to Flagship" (complex file).
 * Score ≤ 50: "Suitable for Small/Local Model".
 
-Supported languages: Python, Go, TypeScript/TSX, YAML, HCL (via tree-sitter).
+Supported languages: Python, Go, TypeScript/TSX, YAML, HCL, Java, C#, Rust, C++, C, JavaScript (via tree-sitter).
 
 === `generate_blueprint`
 

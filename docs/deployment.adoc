@@ -192,3 +192,13 @@ export HIVEMIND_WORKSPACE_PATH="/path/to/codebase"
 * The REST API authentication is minimal by default. In production, configure `security.api_key_header` and validate against `secrets.yaml`.
 * The MCP server communicates over `stdio` and is designed for local use only. Do not expose it over a network.
 * Hivemind is not hardened against prompt injection (see the Security Disclaimer in the README).
+
+
+== CI/CD Integration
+
+Hivemind includes a GitHub Actions workflow (`.github/workflows/test.yml`) that runs on pushes to `main` and pull requests. It automatically:
+
+* Checks out the code and sets up Python.
+* Installs `uv` and syncs all dependencies (including extras).
+* Installs Playwright browser binaries required for the scout crawler.
+* Runs the pytest suite with coverage reporting, enforcing an 80% minimum coverage goal.
