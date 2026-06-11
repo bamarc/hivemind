@@ -23,6 +23,7 @@ from core.secrets import decrypt as _decrypt_secret, is_encrypted as _is_encrypt
 _GLOBAL_CONFIG_PATH: Path = Path("~/.hivemind/config.yaml").expanduser()
 
 class ScoutSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
     urls: List[str] = []
     output_directory: str = ".hivemind/scout"
     recursive: bool = False

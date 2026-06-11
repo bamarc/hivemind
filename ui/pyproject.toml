@@ -1,0 +1,25 @@
+[project]
+name = "hivemind-ui"
+version = "0.1.0"
+description = "Kirigami desktop GUI for Hivemind semantic code indexer"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "hivemind",
+]
+
+[tool.uv.sources]
+hivemind = { path = ".." }
+
+[project.optional-dependencies]
+test = ["pytest>=9.0.0", "pytest-timeout>=2.4.0"]
+
+[tool.setuptools]
+packages = ["backend", "backend.managers", "backend.models", "backend.workers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["..", "."]
+filterwarnings = [
+    "ignore::DeprecationWarning:pydantic",
+]
