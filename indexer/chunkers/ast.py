@@ -26,7 +26,7 @@ class ASTChunker(ChunkingStrategy):
         """Extract a human-readable name for a definition node."""
         for child in node.children:
             if child.type in ("identifier", "type_identifier", "name"):
-                return child.text.decode("utf8")
+                return child.text.decode("utf8", errors="replace")
         return None
 
     def _create_chunks_from_text(self, text: str, filepath: str, start_line: int, base_idx: int, metadata: Dict[str, Any]) -> List[Chunk]:
@@ -111,7 +111,7 @@ class ASTChunker(ChunkingStrategy):
                 # Process definition node
                 name = self._get_node_name(child)
                 start_line = child.start_point[0] + 1
-                node_text = child.text.decode("utf8")
+                node_text = child.text.decode("utf8", errors="replace")
 
                 metadata = {
                     "type": child.type,
