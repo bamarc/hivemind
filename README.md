@@ -2,6 +2,18 @@
 
 Hivemind is a semantic code indexer and search tool. It allows you to index local codebases and web documentation, providing a semantic search interface for AI agents (via MCP) or REST API.
 
+## Graphical UI
+
+Hivemind also has a **Kirigami desktop GUI** built with PySide6:
+
+```bash
+cd ui
+uv sync
+uv run python main.py
+```
+
+See [ui/README.md](ui/README.md) and [ui/QUICKSTART.md](ui/QUICKSTART.md) for details.
+
 ## Key Features
 
 - **Semantic Search**: Powered by Qdrant and high-performance embedding models.

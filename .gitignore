@@ -38,3 +38,8 @@ infra/ansible/**/vault.yml
 .coverage
 htmlcov/
 coverage.xml
+
+# UI subproject
+ui/.venv/
+ui/.pytest_cache/
+ui/*.egg-info/

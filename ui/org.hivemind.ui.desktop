@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hivemind
+Comment=Semantic Code Indexer — Kirigami UI
+Exec=hivemind-ui
+Icon=hivemind
+Categories=Development;Utility;
+Terminal=false
+StartupNotify=true

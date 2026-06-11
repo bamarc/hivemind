@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# QML
+*.qmlc
+*.jsc
+
+# Qt Creator / Designer
+*.autosave
+*.user
+*.pro.user*
