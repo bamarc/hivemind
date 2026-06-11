@@ -15,6 +15,8 @@ from .chunkers.by_size import BySizeChunker
 from .chunkers.by_lines import ByLinesChunker
 from .chunkers.ast import ASTChunker
 from .chunkers.markdown import MarkdownChunker
+from .chunkers.markup import JSONChunker, HTMLChunker, XMLChunker, CSSChunker, SCSSChunker, AsciidocChunker
+
 from .git_utils import GitManager
 from .code_handler import EXTENSION_TO_LANG
 
@@ -55,6 +57,13 @@ class IndexWorker(threading.Thread):
         
         # Dedicated Markdown chunker
         self.markdown_chunker = MarkdownChunker()
+        self.json_chunker = JSONChunker()
+        self.html_chunker = HTMLChunker()
+        self.xml_chunker = XMLChunker()
+        self.css_chunker = CSSChunker()
+        self.scss_chunker = SCSSChunker()
+        self.asciidoc_chunker = AsciidocChunker()
+
         self.progress_callback = None
 
     def run(self):
@@ -97,6 +106,18 @@ class IndexWorker(threading.Thread):
 
         if filepath.suffix == ".md" or (not is_known_code_ext and looks_like_markdown):
             chunks = self.markdown_chunker.chunk(content, str(filepath))
+        elif filepath.suffix == ".json":
+            chunks = self.json_chunker.chunk(content, str(filepath))
+        elif filepath.suffix in (".html", ".htm"):
+            chunks = self.html_chunker.chunk(content, str(filepath))
+        elif filepath.suffix == ".xml":
+            chunks = self.xml_chunker.chunk(content, str(filepath))
+        elif filepath.suffix == ".css":
+            chunks = self.css_chunker.chunk(content, str(filepath))
+        elif filepath.suffix == ".scss":
+            chunks = self.scss_chunker.chunk(content, str(filepath))
+        elif filepath.suffix in (".adoc", ".asciidoc"):
+            chunks = self.asciidoc_chunker.chunk(content, str(filepath))
         else:
             chunks = self.chunker.chunk(content, str(filepath))
             
